@@ -61,23 +61,30 @@ jobs:
             LOCK_HASH_FILE=".deploy-package-lock.sha256"
             CURRENT_LOCK_HASH="$(sha256sum package-lock.json | awk '{print $1}')"
             SAVED_LOCK_HASH=""
+            NEEDS_INSTALL=0
             if [ -f "$LOCK_HASH_FILE" ]; then
               SAVED_LOCK_HASH="$(cat "$LOCK_HASH_FILE")"
             fi
 
             if [ ! -d node_modules ]; then
-              export npm_config_jobs=1
-              npm install --no-audit --no-fund --omit=optional --prefer-offline
-              echo "$CURRENT_LOCK_HASH" > "$LOCK_HASH_FILE"
+              NEEDS_INSTALL=1
+            elif [ ! -x node_modules/.bin/vite ] || [ ! -x node_modules/.bin/tsx ]; then
+              NEEDS_INSTALL=1
             elif [ -z "$SAVED_LOCK_HASH" ]; then
               echo "$CURRENT_LOCK_HASH" > "$LOCK_HASH_FILE"
               echo "Initialized lock hash file from current node_modules."
             elif [ "$CURRENT_LOCK_HASH" != "$SAVED_LOCK_HASH" ]; then
+              NEEDS_INSTALL=1
+            fi
+
+            if [ "$NEEDS_INSTALL" -eq 1 ]; then
               export npm_config_jobs=1
-              npm install --no-audit --no-fund --omit=optional --prefer-offline
+              export npm_config_progress=false
+              export npm_config_loglevel=warn
+              npm install --include=dev --no-audit --no-fund --omit=optional --prefer-offline
               echo "$CURRENT_LOCK_HASH" > "$LOCK_HASH_FILE"
             else
-              echo "Dependencies unchanged, skipping npm install."
+              echo "Dependencies unchanged and toolchain present, skipping npm install."
             fi
 
             npm run build
