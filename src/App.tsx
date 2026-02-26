@@ -94,22 +94,22 @@ type ModelOption = {
 
 const MODEL_OPTIONS: ModelOption[] = [
   {
-    id: 'cointegrated/rubert-tiny-toxicity',
-    name: 'RuBERT Tiny Toxicity',
-    summary: 'Fast Russian toxicity classifier. Works well for insults and aggressive language.',
-    bestFor: 'Fast response and low server load',
+    id: 'local/rubert-tiny-balanced',
+    name: 'RuBERT Tiny ONNX (Balanced)',
+    summary: 'Default local Russian model. Best balance between speed and confidence quality.',
+    bestFor: 'General use on CPU VPS',
   },
   {
-    id: 's-nlp/russian_toxicity_classifier',
-    name: 'Russian Toxicity Classifier',
-    summary: 'Binary toxicity detector with stable confidence for short and medium texts.',
-    bestFor: 'Reliable toxic vs safe decision',
+    id: 'local/rubert-tiny-quantized',
+    name: 'RuBERT Tiny ONNX (Quantized)',
+    summary: 'Quantized ONNX profile with lower RAM usage and faster inference.',
+    bestFor: 'Small server footprint',
   },
   {
-    id: 'apanc/russian-sensitive-topics',
-    name: 'Russian Sensitive Topics',
-    summary: 'Topic risk model for crime, drugs, violence and other sensitive domains.',
-    bestFor: 'Contextual risk and suspicious topic detection',
+    id: 'local/rubert-tiny-fp16',
+    name: 'RuBERT Tiny ONNX (FP16 optimized)',
+    summary: 'Alternative ONNX export that may improve throughput on some CPUs.',
+    bestFor: 'Maximum throughput testing',
   },
 ];
 
@@ -596,7 +596,7 @@ function SentinelApp() {
           <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Модель HuggingFace</label>
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Model (local ONNX)</label>
                 <select 
                   value={settings.mlModel}
                   onChange={e => setSettings({...settings, mlModel: e.target.value})}

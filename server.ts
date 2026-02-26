@@ -6,8 +6,10 @@ import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { NewMessage } from 'telegram/events/index.js';
 import cors from 'cors';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { env as hfEnv, pipeline } from '@huggingface/transformers';
 
 // Define a custom session type
 declare module 'express-session' {
@@ -25,8 +27,13 @@ const PORT = Number(process.env.PORT ?? 3000);
 const SESSION_SECRET = process.env.SESSION_SECRET ?? 'change-me-in-production';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const MODEL_CACHE_DIR = path.resolve(__dirname, '.cache', 'models');
 type UserRole = 'admin' | 'viewer';
 type UserStore = Record<string, { password: string; role: UserRole }>;
+
+fs.mkdirSync(MODEL_CACHE_DIR, { recursive: true });
+hfEnv.cacheDir = MODEL_CACHE_DIR;
+hfEnv.allowLocalModels = true;
 
 app.set('trust proxy', 1);
 app.use(cors());
@@ -62,11 +69,18 @@ type ThreatType = 'safe' | 'toxicity' | 'threat' | 'scam';
 type RiskCategory = Exclude<ThreatType, 'safe'>;
 type RiskScores = Record<RiskCategory, number>;
 type LabelScore = { label: string; score: number };
+type LocalOnnxOptions = {
+  model_file_name?: string;
+  subfolder?: string;
+  dtype?: 'fp32' | 'fp16' | 'q8';
+};
 
 type ThreatModelConfig = {
   id: string;
   name: string;
   description: string;
+  repo: string;
+  inferenceOptions?: LocalOnnxOptions;
   labelHints: {
     toxicity: string[];
     threat: string[];
@@ -74,40 +88,57 @@ type ThreatModelConfig = {
   };
 };
 
-const HF_API_TOKEN = process.env.HF_API_TOKEN ?? process.env.HUGGINGFACE_API_TOKEN ?? '';
 const MODEL_CONFIGS: Record<string, ThreatModelConfig> = {
-  'cointegrated/rubert-tiny-toxicity': {
-    id: 'cointegrated/rubert-tiny-toxicity',
-    name: 'RuBERT Tiny Toxicity',
-    description: 'Fast toxicity model for Russian text.',
+  'local/rubert-tiny-balanced': {
+    id: 'local/rubert-tiny-balanced',
+    name: 'RuBERT Tiny ONNX (Balanced)',
+    description: 'Default local Russian toxicity model. Good quality and stable confidence.',
+    repo: 'aafoninsky/rubert-tiny-toxicity-onnx',
+    inferenceOptions: {
+      dtype: 'fp32',
+    },
     labelHints: {
-      toxicity: ['toxic', 'toxicity', 'insult', 'obscene', 'abuse', 'hate', 'offensive'],
-      threat: ['threat', 'violence', 'kill'],
-      scam: ['fraud', 'scam', 'phishing'],
+      toxicity: ['toxic', 'toxicity', 'insult', 'obscene', 'abuse', 'offensive'],
+      threat: ['threat', 'dangerous', 'violence', 'kill'],
+      scam: ['fraud', 'scam', 'phishing', 'spam'],
     },
   },
-  's-nlp/russian_toxicity_classifier': {
-    id: 's-nlp/russian_toxicity_classifier',
-    name: 'Russian Toxicity Classifier',
-    description: 'Binary toxic vs non-toxic model for Russian text.',
+  'local/rubert-tiny-quantized': {
+    id: 'local/rubert-tiny-quantized',
+    name: 'RuBERT Tiny ONNX (Quantized)',
+    description: 'Lower RAM profile using quantized ONNX weights. Best for small VPS.',
+    repo: 'aafoninsky/rubert-tiny-toxicity-onnx',
+    inferenceOptions: {
+      model_file_name: 'model_quantized',
+      subfolder: 'onnx',
+      dtype: 'fp32',
+    },
     labelHints: {
-      toxicity: ['toxic', 'toxicity', 'label_1'],
-      threat: ['threat', 'violence'],
-      scam: ['fraud', 'scam'],
+      toxicity: ['toxic', 'toxicity', 'insult', 'obscene', 'abuse', 'offensive'],
+      threat: ['threat', 'dangerous', 'violence', 'kill'],
+      scam: ['fraud', 'scam', 'phishing', 'spam'],
     },
   },
-  'apanc/russian-sensitive-topics': {
-    id: 'apanc/russian-sensitive-topics',
-    name: 'Russian Sensitive Topics',
-    description: 'Sensitive topic classifier for risky domains.',
+  'local/rubert-tiny-fp16': {
+    id: 'local/rubert-tiny-fp16',
+    name: 'RuBERT Tiny ONNX (FP16 Optimized)',
+    description: 'Alternative ONNX export optimized for throughput on CPU.',
+    repo: 'morzecrew/rubert-tiny-toxicity-onnx-optimized-fp16',
+    inferenceOptions: {
+      model_file_name: 'optimized_fp16',
+      subfolder: '',
+      dtype: 'fp32',
+    },
     labelHints: {
-      toxicity: ['hate', 'racism', 'sexism', 'harassment', 'porn', 'obscene'],
-      threat: ['terror', 'extrem', 'war', 'weapon', 'violence', 'crime', 'drugs', 'suicide'],
-      scam: ['fraud', 'scam', 'phishing', 'ponzi', 'gambling', 'spam', 'crypto'],
+      toxicity: ['toxic', 'toxicity', 'insult', 'obscene', 'abuse', 'offensive'],
+      threat: ['threat', 'dangerous', 'violence', 'kill'],
+      scam: ['fraud', 'scam', 'phishing', 'spam'],
     },
   },
 };
-const DEFAULT_MODEL_ID = 'cointegrated/rubert-tiny-toxicity';
+const DEFAULT_MODEL_ID = 'local/rubert-tiny-balanced';
+type TextClassifier = (text: string, options?: { top_k?: number }) => Promise<unknown>;
+const classifierCache = new Map<string, Promise<TextClassifier>>();
 const HEURISTIC_PATTERNS: Record<RiskCategory, RegExp[]> = {
   toxicity: [
     /идиот/i,
@@ -270,6 +301,22 @@ function extractModelScores(modelId: string, labels: LabelScore[]): RiskScores {
   return scores;
 }
 
+async function getClassifier(modelId: string): Promise<TextClassifier> {
+  const config = MODEL_CONFIGS[modelId] ?? MODEL_CONFIGS[DEFAULT_MODEL_ID];
+  let classifierPromise = classifierCache.get(config.id);
+
+  if (!classifierPromise) {
+    classifierPromise = (async () => {
+      console.log(`Loading local ONNX model: ${config.name} (${config.repo})`);
+      const classifier = await pipeline('text-classification', config.repo, config.inferenceOptions ?? {});
+      return classifier as TextClassifier;
+    })();
+    classifierCache.set(config.id, classifierPromise);
+  }
+
+  return classifierPromise;
+}
+
 function heuristicScores(text: string): RiskScores {
   const scores = emptyRiskScores();
 
@@ -286,41 +333,10 @@ function heuristicScores(text: string): RiskScores {
 }
 
 async function requestModelScores(modelId: string, text: string): Promise<RiskScores> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
-
-  try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    if (HF_API_TOKEN) {
-      headers.Authorization = `Bearer ${HF_API_TOKEN}`;
-    }
-
-    const response = await fetch(`https://api-inference.huggingface.co/models/${modelId}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        inputs: text.slice(0, 1000),
-        options: { wait_for_model: true },
-      }),
-      signal: controller.signal,
-    });
-
-    const payload = await response.json();
-    if (!response.ok) {
-      const errorMessage =
-        typeof payload?.error === 'string'
-          ? payload.error
-          : `Inference request failed with status ${response.status}`;
-      throw new Error(errorMessage);
-    }
-
-    const labels = normalizeLabelScores(payload);
-    return extractModelScores(modelId, labels);
-  } finally {
-    clearTimeout(timeoutId);
-  }
+  const classifier = await getClassifier(modelId);
+  const payload = await classifier(text.slice(0, 1000), { top_k: 10 });
+  const labels = normalizeLabelScores(payload);
+  return extractModelScores(modelId, labels);
 }
 
 async function analyzeThreat(text: string): Promise<{ type: ThreatType; score: number }> {
@@ -369,6 +385,8 @@ app.post('/api/start', isAdmin, async (req, res) => {
   threatThreshold = normalizeThreshold(requestedThreshold);
   
   try {
+    await getClassifier(selectedModelId);
+
     const stringSession = new StringSession('');
     client = new TelegramClient(stringSession, Number(apiId), apiHash, {
       connectionRetries: 5,
@@ -410,7 +428,7 @@ app.post('/api/start', isAdmin, async (req, res) => {
       status: 'started',
       model: selectedModelId,
       threshold: threatThreshold,
-      usingHfToken: Boolean(HF_API_TOKEN),
+      inferenceBackend: 'local-onnx',
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
