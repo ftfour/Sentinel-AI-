@@ -97,6 +97,17 @@ type PendingSessionAuth = {
   phoneCodeHash: string;
   createdAt: number;
 };
+type RateLimitEntry = {
+  windowStart: number;
+  count: number;
+  blockedUntil: number;
+};
+type RateLimitConfig = {
+  windowMs: number;
+  max: number;
+  cooldownMs: number;
+  error: string;
+};
 
 fs.mkdirSync(MODEL_CACHE_DIR, { recursive: true });
 fs.mkdirSync(RUNTIME_DIR, { recursive: true });
@@ -129,6 +140,7 @@ const users: UserStore = {
 };
 const SESSION_AUTH_TTL_MS = 15 * 60 * 1000;
 const pendingSessionAuth = new Map<string, PendingSessionAuth>();
+const rateLimitStore = new Map<string, RateLimitEntry>();
 
 let client: TelegramClient | null = null;
 let isRunning = false;
@@ -728,8 +740,129 @@ if (!fs.existsSync(SETTINGS_FILE)) {
   savePersistedSettings(persistedSettings);
 }
 
+function rateLimitActor(req: any): string {
+  const username = req?.session?.user?.username ?? 'anonymous';
+  const sessionId = req?.sessionID ?? 'no-session';
+  const ip = req?.ip ?? req?.socket?.remoteAddress ?? 'unknown-ip';
+  return `${username}|${sessionId}|${ip}`;
+}
+
+function consumeRateLimit(action: string, req: any, config: RateLimitConfig): { allowed: true } | { allowed: false; retryAfterMs: number } {
+  const now = Date.now();
+  const key = `${action}|${rateLimitActor(req)}`;
+  const existing = rateLimitStore.get(key);
+
+  if (!existing) {
+    rateLimitStore.set(key, { windowStart: now, count: 1, blockedUntil: 0 });
+    return { allowed: true };
+  }
+
+  if (existing.blockedUntil > now) {
+    return { allowed: false, retryAfterMs: existing.blockedUntil - now };
+  }
+
+  if (now - existing.windowStart >= config.windowMs) {
+    existing.windowStart = now;
+    existing.count = 1;
+    existing.blockedUntil = 0;
+    rateLimitStore.set(key, existing);
+    return { allowed: true };
+  }
+
+  if (existing.count >= config.max) {
+    existing.blockedUntil = now + config.cooldownMs;
+    rateLimitStore.set(key, existing);
+    return { allowed: false, retryAfterMs: config.cooldownMs };
+  }
+
+  existing.count += 1;
+  rateLimitStore.set(key, existing);
+  return { allowed: true };
+}
+
+function withRateLimit(action: string, config: RateLimitConfig) {
+  return (req, res, next) => {
+    const result = consumeRateLimit(action, req, config);
+    if (result.allowed) {
+      next();
+      return;
+    }
+
+    const retryAfterMs = 'retryAfterMs' in result ? result.retryAfterMs : config.cooldownMs;
+    const retryAfterSec = Math.max(1, Math.ceil(retryAfterMs / 1000));
+    res.setHeader('Retry-After', String(retryAfterSec));
+    res.status(429).json({
+      error: config.error,
+      retryAfterMs,
+      retryAfterSec,
+      action,
+    });
+  };
+}
+
+const RL_LOGIN = withRateLimit('login', {
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  cooldownMs: 5 * 60 * 1000,
+  error: 'Too many login attempts. Please wait before trying again.',
+});
+const RL_SETTINGS_GET = withRateLimit('settings_get', {
+  windowMs: 60 * 1000,
+  max: 60,
+  cooldownMs: 10 * 1000,
+  error: 'Too many requests for settings.',
+});
+const RL_SETTINGS_SAVE = withRateLimit('settings_save', {
+  windowMs: 60 * 1000,
+  max: 6,
+  cooldownMs: 20 * 1000,
+  error: 'Too many settings save requests.',
+});
+const RL_SESSION_REQUEST_CODE = withRateLimit('session_request_code', {
+  windowMs: 10 * 60 * 1000,
+  max: 2,
+  cooldownMs: 15 * 60 * 1000,
+  error: 'Too many code requests. Please wait before requesting a new Telegram code.',
+});
+const RL_SESSION_COMPLETE = withRateLimit('session_complete', {
+  windowMs: 5 * 60 * 1000,
+  max: 8,
+  cooldownMs: 60 * 1000,
+  error: 'Too many session confirmation attempts.',
+});
+const RL_CHAT_SYNC = withRateLimit('chat_sync', {
+  windowMs: 2 * 60 * 1000,
+  max: 2,
+  cooldownMs: 90 * 1000,
+  error: 'Chat list sync cooldown is active. Try again later.',
+});
+const RL_ENGINE_CONTROL = withRateLimit('engine_control', {
+  windowMs: 60 * 1000,
+  max: 6,
+  cooldownMs: 30 * 1000,
+  error: 'Too many start/stop requests.',
+});
+const RL_STATUS = withRateLimit('status', {
+  windowMs: 60 * 1000,
+  max: 180,
+  cooldownMs: 10 * 1000,
+  error: 'Status polling is too frequent.',
+});
+const RL_MESSAGES = withRateLimit('messages', {
+  windowMs: 60 * 1000,
+  max: 180,
+  cooldownMs: 10 * 1000,
+  error: 'Message polling is too frequent.',
+});
+const RL_STATS = withRateLimit('stats', {
+  windowMs: 60 * 1000,
+  max: 180,
+  cooldownMs: 10 * 1000,
+  error: 'Stats polling is too frequent.',
+});
+
 // --- AUTH API ---
-app.post('/api/login', (req, res) => {
+app.post('/api/login', RL_LOGIN, (req, res) => {
   const { username, password } = req.body;
   const user = users[username as keyof typeof users];
 
@@ -776,11 +909,11 @@ const isAdmin = (req, res, next) => {
   }
 };
 
-app.get('/api/settings', isAdmin, (_req, res) => {
+app.get('/api/settings', isAdmin, RL_SETTINGS_GET, (_req, res) => {
   res.json(persistedSettings);
 });
 
-app.post('/api/settings', isAdmin, (req, res) => {
+app.post('/api/settings', isAdmin, RL_SETTINGS_SAVE, (req, res) => {
   const merged = sanitizePersistedSettings(req.body, persistedSettings);
   persistedSettings = merged;
   applyPersistedSettings(merged);
@@ -788,7 +921,7 @@ app.post('/api/settings', isAdmin, (req, res) => {
   res.json({ status: 'saved', settings: merged });
 });
 
-app.post('/api/session/request-code', isAdmin, async (req, res) => {
+app.post('/api/session/request-code', isAdmin, RL_SESSION_REQUEST_CODE, async (req, res) => {
   const apiIdValue = toStringValue(req.body?.apiId, persistedSettings.apiId).trim();
   const apiHash = toStringValue(req.body?.apiHash, persistedSettings.apiHash).trim();
   const phoneNumber = toStringValue(req.body?.phoneNumber, '').trim();
@@ -833,7 +966,7 @@ app.post('/api/session/request-code', isAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/session/complete', isAdmin, async (req, res) => {
+app.post('/api/session/complete', isAdmin, RL_SESSION_COMPLETE, async (req, res) => {
   const requestId = toStringValue(req.body?.requestId, '').trim();
   const phoneCode = toStringValue(req.body?.code, '').trim();
   const password = toStringValue(req.body?.password, '').trim();
@@ -915,7 +1048,7 @@ app.post('/api/session/complete', isAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/telegram/chats', isAdmin, async (req, res) => {
+app.post('/api/telegram/chats', isAdmin, RL_CHAT_SYNC, async (req, res) => {
   const creds = resolveTelegramCredentials(req.body);
 
   try {
@@ -1141,7 +1274,7 @@ async function analyzeThreat(text: string): Promise<{ type: ThreatType; score: n
   return { type: 'safe', score: safeConfidence };
 }
 
-app.post('/api/start', isAdmin, async (req, res) => {
+app.post('/api/start', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
   if (isRunning) return res.json({ status: 'already running' });
   
   const {
@@ -1280,7 +1413,7 @@ app.post('/api/start', isAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/stop', isAdmin, async (req, res) => {
+app.post('/api/stop', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
   if (client) {
     await client.disconnect();
     client = null;
@@ -1289,7 +1422,7 @@ app.post('/api/stop', isAdmin, async (req, res) => {
   res.json({ status: 'stopped' });
 });
 
-app.get('/api/status', isAuthenticated, (req, res) => {
+app.get('/api/status', isAuthenticated, RL_STATUS, (req, res) => {
   res.json({
     isRunning,
     model: selectedModelId,
@@ -1297,11 +1430,11 @@ app.get('/api/status', isAuthenticated, (req, res) => {
   });
 });
 
-app.get('/api/messages', isAuthenticated, (req, res) => {
+app.get('/api/messages', isAuthenticated, RL_MESSAGES, (req, res) => {
   res.json(recentMessages);
 });
 
-app.get('/api/stats', isAuthenticated, (req, res) => {
+app.get('/api/stats', isAuthenticated, RL_STATS, (req, res) => {
   res.json(threatStats);
 });
 

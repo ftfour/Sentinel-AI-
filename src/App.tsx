@@ -143,6 +143,7 @@ type AvailableTelegramChat = {
   type: 'group' | 'supergroup' | 'channel';
   avatar: string | null;
 };
+type CooldownKey = 'saveSettings' | 'syncChats' | 'sessionCode' | 'sessionConfirm' | 'engineControl';
 
 const DEFAULT_SETTINGS: SettingsState = {
   apiId: '',
@@ -189,6 +190,13 @@ function SentinelApp() {
   const [sessionNeedsPassword, setSessionNeedsPassword] = useState(false);
   const [isRequestingSessionCode, setIsRequestingSessionCode] = useState(false);
   const [isConfirmingSessionCode, setIsConfirmingSessionCode] = useState(false);
+  const [cooldowns, setCooldowns] = useState<Record<CooldownKey, number>>({
+    saveSettings: 0,
+    syncChats: 0,
+    sessionCode: 0,
+    sessionConfirm: 0,
+    engineControl: 0,
+  });
   const selectedModel = MODEL_OPTIONS.find((model) => model.id === settings.mlModel) ?? MODEL_OPTIONS[0];
 
   // --- DATA FETCHING ---
@@ -225,6 +233,22 @@ function SentinelApp() {
     return () => clearInterval(interval);
   }, [logout]);
 
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCooldowns((prev) => {
+        const next: Record<CooldownKey, number> = {
+          saveSettings: Math.max(0, prev.saveSettings - 1),
+          syncChats: Math.max(0, prev.syncChats - 1),
+          sessionCode: Math.max(0, prev.sessionCode - 1),
+          sessionConfirm: Math.max(0, prev.sessionConfirm - 1),
+          engineControl: Math.max(0, prev.engineControl - 1),
+        };
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const toPersistedSettingsPayload = (source: SettingsState) => ({
     apiId: source.apiId,
     apiHash: source.apiHash,
@@ -246,11 +270,39 @@ function SentinelApp() {
     threatThreshold: source.threatThreshold,
   });
 
+  const startCooldown = (key: CooldownKey, seconds: number): void => {
+    if (!Number.isFinite(seconds) || seconds <= 0) return;
+    const wholeSeconds = Math.ceil(seconds);
+    setCooldowns((prev) => ({
+      ...prev,
+      [key]: Math.max(prev[key], wholeSeconds),
+    }));
+  };
+
+  const extractCooldownSeconds = (res: Response, payload: any): number => {
+    if (res.status !== 429) return 0;
+    const fromBodySec = typeof payload?.retryAfterSec === 'number' ? payload.retryAfterSec : 0;
+    const fromBodyMs = typeof payload?.retryAfterMs === 'number' ? Math.ceil(payload.retryAfterMs / 1000) : 0;
+    const fromHeader = Number(res.headers.get('Retry-After') ?? 0);
+    return Math.max(0, fromBodySec, fromBodyMs, Number.isFinite(fromHeader) ? fromHeader : 0);
+  };
+
+  const cooldownText = (key: CooldownKey): string => {
+    const seconds = cooldowns[key];
+    return seconds > 0 ? `${seconds}s` : '';
+  };
+
   const loadAvailableChats = async (
     credentials?: Partial<Pick<SettingsState, 'apiId' | 'apiHash' | 'authMode' | 'botToken' | 'sessionString'>>,
     showNotification = true
   ): Promise<void> => {
     if (!user || user.role !== 'admin') return;
+    if (cooldowns.syncChats > 0) {
+      if (showNotification) {
+        alert(`Chat sync cooldown: ${cooldownText('syncChats')}`);
+      }
+      return;
+    }
 
     const apiId = (credentials?.apiId ?? settings.apiId).trim();
     const apiHash = (credentials?.apiHash ?? settings.apiHash).trim();
@@ -289,6 +341,10 @@ function SentinelApp() {
 
       const data = await res.json();
       if (!res.ok) {
+        const cooldownSeconds = extractCooldownSeconds(res, data);
+        if (cooldownSeconds > 0) {
+          startCooldown('syncChats', cooldownSeconds);
+        }
         throw new Error(data?.error ?? 'Failed to load Telegram chats');
       }
 
@@ -319,6 +375,11 @@ function SentinelApp() {
   };
 
   const requestSessionCode = async (): Promise<void> => {
+    if (cooldowns.sessionCode > 0) {
+      alert(`Code request cooldown: ${cooldownText('sessionCode')}`);
+      return;
+    }
+
     const apiId = settings.apiId.trim();
     const apiHash = settings.apiHash.trim();
     const phoneNumber = sessionPhoneNumber.trim();
@@ -338,6 +399,10 @@ function SentinelApp() {
 
       const data = await res.json();
       if (!res.ok) {
+        const cooldownSeconds = extractCooldownSeconds(res, data);
+        if (cooldownSeconds > 0) {
+          startCooldown('sessionCode', cooldownSeconds);
+        }
         throw new Error(data?.error ?? 'Failed to request login code');
       }
 
@@ -355,6 +420,11 @@ function SentinelApp() {
   };
 
   const confirmSessionCode = async (): Promise<void> => {
+    if (cooldowns.sessionConfirm > 0) {
+      alert(`Session confirm cooldown: ${cooldownText('sessionConfirm')}`);
+      return;
+    }
+
     const requestId = sessionRequestId.trim();
     const code = sessionCode.trim();
 
@@ -380,6 +450,12 @@ function SentinelApp() {
       });
 
       const data = await res.json();
+      if (res.status === 429) {
+        const cooldownSeconds = extractCooldownSeconds(res, data);
+        if (cooldownSeconds > 0) {
+          startCooldown('sessionConfirm', cooldownSeconds);
+        }
+      }
       if (res.status === 409 && data?.requiresPassword) {
         setSessionNeedsPassword(true);
         alert('This account has 2FA password. Enter it and confirm again.');
@@ -455,6 +531,12 @@ function SentinelApp() {
 
   const saveSettings = async (showNotification = true): Promise<boolean> => {
     if (!user || user.role !== 'admin') return false;
+    if (cooldowns.saveSettings > 0) {
+      if (showNotification) {
+        alert(`Save cooldown: ${cooldownText('saveSettings')}`);
+      }
+      return false;
+    }
     setIsSavingSettings(true);
 
     try {
@@ -466,6 +548,10 @@ function SentinelApp() {
 
       const data = await res.json();
       if (!res.ok) {
+        const cooldownSeconds = extractCooldownSeconds(res, data);
+        if (cooldownSeconds > 0) {
+          startCooldown('saveSettings', cooldownSeconds);
+        }
         if (showNotification) {
           alert(data.error ?? 'Не удалось сохранить конфигурацию');
         }
@@ -499,9 +585,22 @@ function SentinelApp() {
 
   const toggleEngine = async () => {
     if (!user || user.role !== 'admin') return;
+    if (cooldowns.engineControl > 0) {
+      alert(`Engine control cooldown: ${cooldownText('engineControl')}`);
+      return;
+    }
     try {
       if (isRunning) {
-        await fetch('/api/stop', { method: 'POST' });
+        const stopRes = await fetch('/api/stop', { method: 'POST' });
+        const stopData = await stopRes.json();
+        if (!stopRes.ok) {
+          const cooldownSeconds = extractCooldownSeconds(stopRes, stopData);
+          if (cooldownSeconds > 0) {
+            startCooldown('engineControl', cooldownSeconds);
+          }
+          alert(stopData?.error ?? 'Failed to stop engine');
+          return;
+        }
         setIsRunning(false);
       } else {
         const saved = await saveSettings(false);
@@ -525,6 +624,14 @@ function SentinelApp() {
           })
         });
         const data = await res.json();
+        if (!res.ok) {
+          const cooldownSeconds = extractCooldownSeconds(res, data);
+          if (cooldownSeconds > 0) {
+            startCooldown('engineControl', cooldownSeconds);
+          }
+          alert(`ÐžÑˆÐ¸Ð±ÐºÐ° Ð·Ð°Ð¿ÑƒÑÐºÐ° Ð´Ð²Ð¸Ð¶ÐºÐ°: ${data?.error ?? 'Unknown error'}`);
+          return;
+        }
         if (data.error) {
           alert(`Ошибка запуска движка: ${data.error}`);
         } else {
@@ -789,15 +896,19 @@ function SentinelApp() {
                   <button
                     type="button"
                     onClick={() => void requestSessionCode()}
-                    disabled={isRequestingSessionCode}
+                    disabled={isRequestingSessionCode || cooldowns.sessionCode > 0}
                     className={cn(
                       "w-full px-3 py-2 rounded-lg border text-sm transition-colors",
-                      isRequestingSessionCode
+                      isRequestingSessionCode || cooldowns.sessionCode > 0
                         ? "border-slate-700 text-slate-500 cursor-not-allowed"
                         : "border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/10"
                     )}
                   >
-                    {isRequestingSessionCode ? 'Requesting code...' : 'Send Telegram Code'}
+                    {isRequestingSessionCode
+                      ? 'Requesting code...'
+                      : cooldowns.sessionCode > 0
+                        ? `Cooldown ${cooldownText('sessionCode')}`
+                        : 'Send Telegram Code'}
                   </button>
 
                   {sessionRequestId && (
@@ -819,15 +930,19 @@ function SentinelApp() {
                       <button
                         type="button"
                         onClick={() => void confirmSessionCode()}
-                        disabled={isConfirmingSessionCode}
+                        disabled={isConfirmingSessionCode || cooldowns.sessionConfirm > 0}
                         className={cn(
                           "w-full px-3 py-2 rounded-lg border text-sm transition-colors",
-                          isConfirmingSessionCode
+                          isConfirmingSessionCode || cooldowns.sessionConfirm > 0
                             ? "border-slate-700 text-slate-500 cursor-not-allowed"
                             : "border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/10"
                         )}
                       >
-                        {isConfirmingSessionCode ? 'Confirming...' : 'Confirm And Generate Session'}
+                        {isConfirmingSessionCode
+                          ? 'Confirming...'
+                          : cooldowns.sessionConfirm > 0
+                            ? `Cooldown ${cooldownText('sessionConfirm')}`
+                            : 'Confirm And Generate Session'}
                       </button>
                     </div>
                   )}
@@ -853,16 +968,20 @@ function SentinelApp() {
                 <button
                   type="button"
                   onClick={() => void loadAvailableChats(undefined, true)}
-                  disabled={isLoadingAvailableChats}
+                  disabled={isLoadingAvailableChats || cooldowns.syncChats > 0}
                   className={cn(
                     "inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors",
-                    isLoadingAvailableChats
+                    isLoadingAvailableChats || cooldowns.syncChats > 0
                       ? "border-slate-700 text-slate-500 cursor-not-allowed"
                       : "border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/10"
                   )}
                 >
                   <RefreshCw className={cn("w-4 h-4", isLoadingAvailableChats && "animate-spin")} />
-                  {isLoadingAvailableChats ? 'Syncing...' : 'Sync list'}
+                  {isLoadingAvailableChats
+                    ? 'Syncing...'
+                    : cooldowns.syncChats > 0
+                      ? `Cooldown ${cooldownText('syncChats')}`
+                      : 'Sync list'}
                 </button>
               </div>
 
@@ -1176,16 +1295,20 @@ function SentinelApp() {
         <div className="flex justify-end pt-4">
           <button
             onClick={() => void saveSettings(true)}
-            disabled={isSavingSettings}
+            disabled={isSavingSettings || cooldowns.saveSettings > 0}
             className={cn(
               "text-white px-6 py-2.5 rounded-lg font-medium transition-colors flex items-center shadow-lg shadow-indigo-500/20",
-              isSavingSettings
+              isSavingSettings || cooldowns.saveSettings > 0
                 ? "bg-indigo-800 cursor-not-allowed opacity-80"
                 : "bg-indigo-600 hover:bg-indigo-700"
             )}
           >
             <Save className="w-4 h-4 mr-2" />
-            {isSavingSettings ? 'Сохранение...' : 'Сохранить конфигурацию'}
+            {isSavingSettings
+              ? 'Сохранение...'
+              : cooldowns.saveSettings > 0
+                ? `Кд ${cooldownText('saveSettings')}`
+                : 'Сохранить конфигурацию'}
           </button>
         </div>
       </div>
@@ -1259,14 +1382,18 @@ function SentinelApp() {
             {user.role === 'admin' && (
               <button
                 onClick={toggleEngine}
+                disabled={cooldowns.engineControl > 0}
                 className={cn(
                   "flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-sm",
+                  cooldowns.engineControl > 0 && "opacity-60 cursor-not-allowed",
                   isRunning 
                     ? "bg-red-500/10 text-red-400 hover:bg-red-500/20 border border-red-500/20" 
                     : "bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20"
                 )}
               >
-                {isRunning ? (
+                {cooldowns.engineControl > 0 ? (
+                  <><Square className="w-4 h-4 mr-2 fill-current" /> КД {cooldownText('engineControl')}</>
+                ) : isRunning ? (
                   <><Square className="w-4 h-4 mr-2 fill-current" /> Остановить движок</>
                 ) : (
                   <><Play className="w-4 h-4 mr-2 fill-current" /> Запустить движок</>
