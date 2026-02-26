@@ -32,10 +32,13 @@ const RUNTIME_DIR = path.resolve(__dirname, '.runtime');
 const SETTINGS_FILE = path.join(RUNTIME_DIR, 'admin-settings.json');
 type UserRole = 'admin' | 'viewer';
 type UserStore = Record<string, { password: string; role: UserRole }>;
+type TelegramAuthMode = 'bot' | 'user';
 type PersistedAppSettings = {
   apiId: string;
   apiHash: string;
+  authMode: TelegramAuthMode;
   botToken: string;
+  sessionString: string;
   sessionName: string;
   targetChats: string[];
   proxyEnabled: boolean;
@@ -55,10 +58,10 @@ type PersistedAppSettings = {
   mlModel: string;
   threatThreshold: number; // 1..99
 };
-type TelegramBotCredentials = {
+type TelegramUserCredentials = {
   apiId: number;
   apiHash: string;
-  botToken: string;
+  sessionString: string;
 };
 type TelegramChatSummary = {
   id: string;
@@ -193,7 +196,9 @@ const DEFAULT_MODEL_ID = 'local/rubert-tiny-balanced';
 const DEFAULT_PERSISTED_SETTINGS: PersistedAppSettings = {
   apiId: '',
   apiHash: '',
+  authMode: 'bot',
   botToken: '',
+  sessionString: '',
   sessionName: 'sentinel_session',
   targetChats: ['-1003803680927'],
   proxyEnabled: false,
@@ -291,6 +296,10 @@ function normalizeThresholdPercent(value: unknown, fallback: number): number {
   return Math.min(99, Math.max(1, Math.round(normalized * 100)));
 }
 
+function normalizeAuthMode(value: unknown, fallback: TelegramAuthMode): TelegramAuthMode {
+  return value === 'user' || value === 'bot' ? value : fallback;
+}
+
 function sanitizePersistedSettings(
   input: unknown,
   fallback: PersistedAppSettings = DEFAULT_PERSISTED_SETTINGS
@@ -307,7 +316,9 @@ function sanitizePersistedSettings(
   return {
     apiId: toStringValue(raw.apiId, fallback.apiId),
     apiHash: toStringValue(raw.apiHash, fallback.apiHash),
+    authMode: normalizeAuthMode(raw.authMode, fallback.authMode),
     botToken: toStringValue(raw.botToken, fallback.botToken),
+    sessionString: toStringValue(raw.sessionString, fallback.sessionString),
     sessionName: toStringValue(raw.sessionName, fallback.sessionName),
     targetChats: toStringArray(raw.targetChats, fallback.targetChats),
     proxyEnabled: toBooleanValue(raw.proxyEnabled, fallback.proxyEnabled),
@@ -360,13 +371,17 @@ function parsePositiveInteger(value: string): number | null {
 function resolveTelegramCredentials(source: unknown): {
   apiId: string;
   apiHash: string;
+  authMode: TelegramAuthMode;
   botToken: string;
+  sessionString: string;
 } {
   const raw = typeof source === 'object' && source !== null ? (source as Record<string, unknown>) : {};
   return {
     apiId: toStringValue(raw.apiId, persistedSettings.apiId).trim(),
     apiHash: toStringValue(raw.apiHash, persistedSettings.apiHash).trim(),
+    authMode: normalizeAuthMode(raw.authMode, persistedSettings.authMode),
     botToken: toStringValue(raw.botToken, persistedSettings.botToken).trim(),
+    sessionString: toStringValue(raw.sessionString, persistedSettings.sessionString).trim(),
   };
 }
 
@@ -579,11 +594,6 @@ async function collectTelegramChatsViaBotApi(
   );
 }
 
-function isDialogsForbiddenForBot(error: unknown): boolean {
-  const message = (error as Error)?.message ?? '';
-  return message.includes('BOT_METHOD_INVALID') || message.includes('messages.GetDialogs');
-}
-
 async function collectTelegramChats(clientRef: TelegramClient): Promise<TelegramChatSummary[]> {
   const dialogs = await clientRef.getDialogs({ limit: 200 });
   const chats: TelegramChatSummary[] = [];
@@ -628,23 +638,25 @@ async function collectTelegramChats(clientRef: TelegramClient): Promise<Telegram
   return chats;
 }
 
-async function runWithBotClient<T>(
-  credentials: TelegramBotCredentials,
+async function runWithUserSessionClient<T>(
+  credentials: TelegramUserCredentials,
   reuseRunningClient: boolean,
   action: (clientRef: TelegramClient) => Promise<T>
 ): Promise<T> {
-  if (reuseRunningClient && client && isRunning) {
+  if (reuseRunningClient && client && isRunning && runtimeAuthMode === 'user') {
     return action(client);
   }
 
-  const tempSession = new StringSession('');
+  const tempSession = new StringSession(credentials.sessionString);
   const tempClient = new TelegramClient(tempSession, credentials.apiId, credentials.apiHash, {
     connectionRetries: 3,
   });
 
-  await tempClient.start({
-    botAuthToken: credentials.botToken,
-  });
+  await tempClient.connect();
+  const isAuthorized = await tempClient.checkAuthorization();
+  if (!isAuthorized) {
+    throw new Error('Telegram user session is not authorized');
+  }
 
   try {
     return await action(tempClient);
@@ -657,12 +669,14 @@ function applyPersistedSettings(settings: PersistedAppSettings): void {
   selectedModelId = settings.mlModel;
   threatThreshold = settings.threatThreshold / 100;
   targetChats = [...settings.targetChats];
+  runtimeAuthMode = settings.authMode;
 }
 
 let persistedSettings = loadPersistedSettings();
 let selectedModelId = persistedSettings.mlModel;
 let threatThreshold = persistedSettings.threatThreshold / 100;
 let targetChats: string[] = [...persistedSettings.targetChats];
+let runtimeAuthMode: TelegramAuthMode = persistedSettings.authMode;
 applyPersistedSettings(persistedSettings);
 if (!fs.existsSync(SETTINGS_FILE)) {
   savePersistedSettings(persistedSettings);
@@ -730,42 +744,37 @@ app.post('/api/settings', isAdmin, (req, res) => {
 
 app.post('/api/telegram/chats', isAdmin, async (req, res) => {
   const creds = resolveTelegramCredentials(req.body);
-  if (!creds.botToken) {
-    return res.status(400).json({ error: 'Bot Token is required' });
-  }
-
-  const parsedApiId = parsePositiveInteger(creds.apiId);
-  const hasMtprotoCreds = !!parsedApiId && !!creds.apiHash;
-
-  const reuseRunningClient =
-    hasMtprotoCreds &&
-    !!client &&
-    isRunning &&
-    creds.apiId === persistedSettings.apiId &&
-    creds.apiHash === persistedSettings.apiHash &&
-    creds.botToken === persistedSettings.botToken;
 
   try {
     let chats: TelegramChatSummary[] = [];
 
-    if (hasMtprotoCreds) {
-      try {
-        chats = await runWithBotClient(
-          {
-            apiId: parsedApiId as number,
-            apiHash: creds.apiHash,
-            botToken: creds.botToken,
-          },
-          reuseRunningClient,
-          collectTelegramChats
-        );
-      } catch (error) {
-        if (!isDialogsForbiddenForBot(error)) {
-          throw error;
-        }
-        chats = await collectTelegramChatsViaBotApi(creds.botToken, persistedSettings.targetChats);
+    if (creds.authMode === 'user') {
+      const parsedApiId = parsePositiveInteger(creds.apiId);
+      if (!parsedApiId || !creds.apiHash || !creds.sessionString) {
+        return res.status(400).json({ error: 'API ID, API Hash and Session String are required for account mode' });
       }
+
+      const reuseRunningClient =
+        !!client &&
+        isRunning &&
+        runtimeAuthMode === 'user' &&
+        creds.apiId === persistedSettings.apiId &&
+        creds.apiHash === persistedSettings.apiHash &&
+        creds.sessionString === persistedSettings.sessionString;
+
+      chats = await runWithUserSessionClient(
+        {
+          apiId: parsedApiId,
+          apiHash: creds.apiHash,
+          sessionString: creds.sessionString,
+        },
+        reuseRunningClient,
+        collectTelegramChats
+      );
     } else {
+      if (!creds.botToken) {
+        return res.status(400).json({ error: 'Bot Token is required for bot mode' });
+      }
       chats = await collectTelegramChatsViaBotApi(creds.botToken, persistedSettings.targetChats);
     }
 
@@ -951,10 +960,21 @@ async function analyzeThreat(text: string): Promise<{ type: ThreatType; score: n
 app.post('/api/start', isAdmin, async (req, res) => {
   if (isRunning) return res.json({ status: 'already running' });
   
-  const { apiId, apiHash, botToken, chats, model, threatThreshold: requestedThreshold } = req.body;
+  const {
+    apiId,
+    apiHash,
+    authMode,
+    botToken,
+    sessionString,
+    chats,
+    model,
+    threatThreshold: requestedThreshold
+  } = req.body;
   const resolvedApiId = toStringValue(apiId, persistedSettings.apiId).trim();
   const resolvedApiHash = toStringValue(apiHash, persistedSettings.apiHash).trim();
+  const resolvedAuthMode = normalizeAuthMode(authMode, persistedSettings.authMode);
   const resolvedBotToken = toStringValue(botToken, persistedSettings.botToken).trim();
+  const resolvedSessionString = toStringValue(sessionString, persistedSettings.sessionString).trim();
   const resolvedChats = Array.isArray(chats)
     ? toStringArray(chats, persistedSettings.targetChats)
     : persistedSettings.targetChats;
@@ -964,8 +984,20 @@ app.post('/api/start', isAdmin, async (req, res) => {
       ? persistedSettings.threatThreshold / 100
       : normalizeThreshold(requestedThreshold);
 
-  if (!resolvedApiId || !resolvedApiHash || !resolvedBotToken) {
-    return res.status(400).json({ error: 'API ID, API Hash, and Bot Token are required' });
+  if (!resolvedApiId || !resolvedApiHash) {
+    return res.status(400).json({ error: 'API ID and API Hash are required' });
+  }
+  const parsedApiId = parsePositiveInteger(resolvedApiId);
+  if (!parsedApiId) {
+    return res.status(400).json({ error: 'API ID must be a positive integer' });
+  }
+
+  if (resolvedAuthMode === 'bot' && !resolvedBotToken) {
+    return res.status(400).json({ error: 'Bot Token is required for bot mode' });
+  }
+
+  if (resolvedAuthMode === 'user' && !resolvedSessionString) {
+    return res.status(400).json({ error: 'Session String is required for account mode' });
   }
 
   persistedSettings = sanitizePersistedSettings(
@@ -973,7 +1005,9 @@ app.post('/api/start', isAdmin, async (req, res) => {
       ...persistedSettings,
       apiId: resolvedApiId,
       apiHash: resolvedApiHash,
+      authMode: resolvedAuthMode,
       botToken: resolvedBotToken,
+      sessionString: resolvedSessionString,
       targetChats: resolvedChats,
       mlModel: resolvedModel,
       threatThreshold: Math.round(resolvedThreshold * 100),
@@ -986,16 +1020,40 @@ app.post('/api/start', isAdmin, async (req, res) => {
   try {
     await getClassifier(selectedModelId);
 
-    const stringSession = new StringSession('');
-    client = new TelegramClient(stringSession, Number(resolvedApiId), resolvedApiHash, {
+    const stringSession = new StringSession(resolvedAuthMode === 'user' ? resolvedSessionString : '');
+    client = new TelegramClient(stringSession, parsedApiId, resolvedApiHash, {
       connectionRetries: 5,
     });
-    
-    await client.start({
-      botAuthToken: resolvedBotToken,
-    });
-    
+
+    if (resolvedAuthMode === 'bot') {
+      await client.start({
+        botAuthToken: resolvedBotToken,
+      });
+    } else {
+      await client.connect();
+      const isAuthorized = await client.checkAuthorization();
+      if (!isAuthorized) {
+        throw new Error('Telegram user session is not authorized. Generate a valid String Session and save it.');
+      }
+    }
+
+    if (resolvedAuthMode === 'user') {
+      const currentSession = stringSession.save();
+      if (currentSession && currentSession !== persistedSettings.sessionString) {
+        persistedSettings = sanitizePersistedSettings(
+          {
+            ...persistedSettings,
+            sessionString: currentSession,
+          },
+          persistedSettings
+        );
+        applyPersistedSettings(persistedSettings);
+        savePersistedSettings(persistedSettings);
+      }
+    }
+
     isRunning = true;
+    runtimeAuthMode = resolvedAuthMode;
     
     client.addEventHandler(async (event) => {
       const message = event.message;

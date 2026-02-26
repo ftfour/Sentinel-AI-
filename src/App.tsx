@@ -116,7 +116,9 @@ const MODEL_OPTIONS: ModelOption[] = [
 type SettingsState = {
   apiId: string;
   apiHash: string;
+  authMode: 'bot' | 'user';
   botToken: string;
+  sessionString: string;
   sessionName: string;
   targetChats: string[];
   newChatInput: string;
@@ -145,7 +147,9 @@ type AvailableTelegramChat = {
 const DEFAULT_SETTINGS: SettingsState = {
   apiId: '',
   apiHash: '',
+  authMode: 'bot',
   botToken: '',
+  sessionString: '',
   sessionName: 'sentinel_session',
   targetChats: ['-1003803680927'],
   newChatInput: '',
@@ -217,7 +221,9 @@ function SentinelApp() {
   const toPersistedSettingsPayload = (source: SettingsState) => ({
     apiId: source.apiId,
     apiHash: source.apiHash,
+    authMode: source.authMode,
     botToken: source.botToken,
+    sessionString: source.sessionString,
     sessionName: source.sessionName,
     targetChats: source.targetChats,
     proxyEnabled: source.proxyEnabled,
@@ -234,18 +240,34 @@ function SentinelApp() {
   });
 
   const loadAvailableChats = async (
-    credentials?: Partial<Pick<SettingsState, 'apiId' | 'apiHash' | 'botToken'>>,
+    credentials?: Partial<Pick<SettingsState, 'apiId' | 'apiHash' | 'authMode' | 'botToken' | 'sessionString'>>,
     showNotification = true
   ): Promise<void> => {
     if (!user || user.role !== 'admin') return;
 
     const apiId = (credentials?.apiId ?? settings.apiId).trim();
     const apiHash = (credentials?.apiHash ?? settings.apiHash).trim();
+    const authMode = credentials?.authMode ?? settings.authMode;
     const botToken = (credentials?.botToken ?? settings.botToken).trim();
+    const sessionString = (credentials?.sessionString ?? settings.sessionString).trim();
 
-    if (!apiId || !apiHash || !botToken) {
+    if (!apiId || !apiHash) {
       if (showNotification) {
-        alert('Fill API ID, API Hash and Bot Token first, then sync chats.');
+        alert('Fill API ID and API Hash first.');
+      }
+      return;
+    }
+
+    if (authMode === 'bot' && !botToken) {
+      if (showNotification) {
+        alert('Fill Bot Token first.');
+      }
+      return;
+    }
+
+    if (authMode === 'user' && !sessionString) {
+      if (showNotification) {
+        alert('Fill Session String first.');
       }
       return;
     }
@@ -255,7 +277,7 @@ function SentinelApp() {
       const res = await fetch('/api/telegram/chats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiId, apiHash, botToken }),
+        body: JSON.stringify({ apiId, apiHash, authMode, botToken, sessionString }),
       });
 
       const data = await res.json();
@@ -304,6 +326,8 @@ function SentinelApp() {
         setSettings((prev) => ({
           ...prev,
           ...saved,
+          authMode: saved?.authMode === 'user' || saved?.authMode === 'bot' ? saved.authMode : prev.authMode,
+          sessionString: typeof saved?.sessionString === 'string' ? saved.sessionString : prev.sessionString,
           targetChats: Array.isArray(saved?.targetChats) ? saved.targetChats : prev.targetChats,
           keywords: Array.isArray(saved?.keywords) ? saved.keywords : prev.keywords,
           mediaTypes: {
@@ -314,15 +338,6 @@ function SentinelApp() {
           newKeywordInput: '',
         }));
 
-        const savedApiId = typeof saved?.apiId === 'string' ? saved.apiId.trim() : '';
-        const savedApiHash = typeof saved?.apiHash === 'string' ? saved.apiHash.trim() : '';
-        const savedBotToken = typeof saved?.botToken === 'string' ? saved.botToken.trim() : '';
-        if (savedApiId && savedApiHash && savedBotToken) {
-          void loadAvailableChats(
-            { apiId: savedApiId, apiHash: savedApiHash, botToken: savedBotToken },
-            false
-          );
-        }
       } catch (err) {
         console.error('Failed to load saved settings', err);
       }
@@ -397,7 +412,9 @@ function SentinelApp() {
           body: JSON.stringify({
             apiId: settings.apiId,
             apiHash: settings.apiHash,
+            authMode: settings.authMode,
             botToken: settings.botToken,
+            sessionString: settings.sessionString,
             chats: settings.targetChats,
             model: settings.mlModel,
             threatThreshold: settings.threatThreshold / 100
@@ -622,25 +639,41 @@ function SentinelApp() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Токен бота (требуется для этого демо)</label>
-              <input 
-                type="password" 
-                value={settings.botToken}
-                onChange={e => setSettings({...settings, botToken: e.target.value})}
-                className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono"
-                placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
-              />
-              <p className="text-[11px] text-amber-500 mt-1">Примечание: вы должны добавить своего бота в целевые группы/каналы в качестве администратора для чтения сообщений.</p>
+              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Auth Mode</label>
+              <select
+                value={settings.authMode}
+                onChange={e => setSettings({...settings, authMode: e.target.value as 'bot' | 'user'})}
+                className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
+              >
+                <option value="bot">Bot Token</option>
+                <option value="user">Telegram Account Session</option>
+              </select>
             </div>
-            <div className="space-y-2">
-              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Имя сессии</label>
-              <input 
-                type="text" 
-                value={settings.sessionName}
-                onChange={e => setSettings({...settings, sessionName: e.target.value})}
-                className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono"
-              />
-            </div>
+            {settings.authMode === 'bot' ? (
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Bot Token</label>
+                <input
+                  type="password"
+                  value={settings.botToken}
+                  onChange={e => setSettings({...settings, botToken: e.target.value})}
+                  className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono"
+                  placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+                />
+                <p className="text-[11px] text-amber-500 mt-1">Bot mode reads only chats where the bot is added.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Session String</label>
+                <textarea
+                  value={settings.sessionString}
+                  onChange={e => setSettings({...settings, sessionString: e.target.value})}
+                  rows={3}
+                  className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono"
+                  placeholder="Paste Telegram String Session for your account"
+                />
+                <p className="text-[11px] text-amber-500 mt-1">Account mode uses your Telegram account dialogs directly.</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -655,7 +688,7 @@ function SentinelApp() {
             <div className="p-6 flex-1 flex flex-col space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Sync groups/channels available for this bot and select targets.
+                  Sync groups/channels for current auth mode and select targets.
                 </p>
                 <button
                   type="button"
@@ -678,7 +711,7 @@ function SentinelApp() {
                   <div className="text-center text-slate-500 text-sm py-6">Loading Telegram chats...</div>
                 ) : availableChats.length === 0 ? (
                   <div className="text-center text-slate-500 text-sm py-6">
-                    No chats loaded yet. Click "Sync list" after filling Telegram credentials.
+                    No chats loaded yet. Click "Sync list" after filling credentials for selected mode.
                   </div>
                 ) : (
                   <ul className="space-y-1">
@@ -1119,4 +1152,5 @@ export default function App() {
     </AuthProvider>
   )
 }
+
 
