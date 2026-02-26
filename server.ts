@@ -422,6 +422,11 @@ function takePendingSessionAuth(requestId: string): PendingSessionAuth | null {
   return entry;
 }
 
+function isDialogsForbiddenForBot(error: unknown): boolean {
+  const message = (error as Error)?.message ?? '';
+  return message.includes('BOT_METHOD_INVALID') || message.includes('messages.GetDialogs');
+}
+
 function resolveChatType(dialog: any): TelegramChatSummary['type'] | null {
   if (!dialog) return null;
   if (dialog.isGroup) {
@@ -694,6 +699,10 @@ async function runWithUserSessionClient<T>(
   if (!isAuthorized) {
     throw new Error('Telegram user session is not authorized');
   }
+  const me = await tempClient.getMe();
+  if (me && typeof me === 'object' && 'bot' in me && (me as any).bot) {
+    throw new Error('Session string belongs to a bot account. Switch Auth Mode to Bot Token.');
+  }
 
   try {
     return await action(tempClient);
@@ -926,15 +935,26 @@ app.post('/api/telegram/chats', isAdmin, async (req, res) => {
         creds.apiHash === persistedSettings.apiHash &&
         creds.sessionString === persistedSettings.sessionString;
 
-      chats = await runWithUserSessionClient(
-        {
-          apiId: parsedApiId,
-          apiHash: creds.apiHash,
-          sessionString: creds.sessionString,
-        },
-        reuseRunningClient,
-        collectTelegramChats
-      );
+      try {
+        chats = await runWithUserSessionClient(
+          {
+            apiId: parsedApiId,
+            apiHash: creds.apiHash,
+            sessionString: creds.sessionString,
+          },
+          reuseRunningClient,
+          collectTelegramChats
+        );
+      } catch (error) {
+        if (isDialogsForbiddenForBot(error)) {
+          if (!creds.botToken) {
+            return res.status(400).json({ error: 'Session belongs to bot account. Switch Auth Mode to Bot Token.' });
+          }
+          chats = await collectTelegramChatsViaBotApi(creds.botToken, persistedSettings.targetChats);
+        } else {
+          throw error;
+        }
+      }
     } else {
       if (!creds.botToken) {
         return res.status(400).json({ error: 'Bot Token is required for bot mode' });
@@ -1198,6 +1218,10 @@ app.post('/api/start', isAdmin, async (req, res) => {
       const isAuthorized = await client.checkAuthorization();
       if (!isAuthorized) {
         throw new Error('Telegram user session is not authorized. Generate a valid String Session and save it.');
+      }
+      const me = await client.getMe();
+      if (me && typeof me === 'object' && 'bot' in me && (me as any).bot) {
+        throw new Error('Session string belongs to a bot account. Switch Auth Mode to Bot Token.');
       }
     }
 
