@@ -2,12 +2,13 @@ import 'dotenv/config';
 import express from 'express';
 import session from 'express-session';
 import { createServer as createViteServer } from 'vite';
-import { TelegramClient } from 'telegram';
+import { Api, TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { NewMessage } from 'telegram/events/index.js';
 import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { env as hfEnv, pipeline } from '@huggingface/transformers';
 
@@ -86,6 +87,16 @@ type BotApiChat = {
     big_file_id?: string;
   };
 };
+type PendingSessionAuth = {
+  id: string;
+  client: TelegramClient;
+  stringSession: StringSession;
+  apiId: number;
+  apiHash: string;
+  phoneNumber: string;
+  phoneCodeHash: string;
+  createdAt: number;
+};
 
 fs.mkdirSync(MODEL_CACHE_DIR, { recursive: true });
 fs.mkdirSync(RUNTIME_DIR, { recursive: true });
@@ -116,6 +127,8 @@ const users: UserStore = {
   admin: { password: process.env.ADMIN_PASSWORD ?? '1q2w3e4r', role: 'admin' },
   viewer: { password: process.env.VIEWER_PASSWORD ?? '1234', role: 'viewer' },
 };
+const SESSION_AUTH_TTL_MS = 15 * 60 * 1000;
+const pendingSessionAuth = new Map<string, PendingSessionAuth>();
 
 let client: TelegramClient | null = null;
 let isRunning = false;
@@ -383,6 +396,30 @@ function resolveTelegramCredentials(source: unknown): {
     botToken: toStringValue(raw.botToken, persistedSettings.botToken).trim(),
     sessionString: toStringValue(raw.sessionString, persistedSettings.sessionString).trim(),
   };
+}
+
+async function disposePendingSessionAuth(entry: PendingSessionAuth): Promise<void> {
+  await entry.client.disconnect().catch(() => undefined);
+}
+
+function cleanupExpiredSessionAuthRequests(): void {
+  const now = Date.now();
+  for (const [requestId, entry] of pendingSessionAuth.entries()) {
+    if (now - entry.createdAt > SESSION_AUTH_TTL_MS) {
+      pendingSessionAuth.delete(requestId);
+      void disposePendingSessionAuth(entry);
+    }
+  }
+}
+
+function takePendingSessionAuth(requestId: string): PendingSessionAuth | null {
+  cleanupExpiredSessionAuthRequests();
+  const entry = pendingSessionAuth.get(requestId);
+  if (!entry) {
+    return null;
+  }
+  pendingSessionAuth.delete(requestId);
+  return entry;
 }
 
 function resolveChatType(dialog: any): TelegramChatSummary['type'] | null {
@@ -740,6 +777,133 @@ app.post('/api/settings', isAdmin, (req, res) => {
   applyPersistedSettings(merged);
   savePersistedSettings(merged);
   res.json({ status: 'saved', settings: merged });
+});
+
+app.post('/api/session/request-code', isAdmin, async (req, res) => {
+  const apiIdValue = toStringValue(req.body?.apiId, persistedSettings.apiId).trim();
+  const apiHash = toStringValue(req.body?.apiHash, persistedSettings.apiHash).trim();
+  const phoneNumber = toStringValue(req.body?.phoneNumber, '').trim();
+
+  const apiId = parsePositiveInteger(apiIdValue);
+  if (!apiId || !apiHash || !phoneNumber) {
+    return res.status(400).json({ error: 'API ID, API Hash and phone number are required' });
+  }
+
+  cleanupExpiredSessionAuthRequests();
+
+  let tempClient: TelegramClient | null = null;
+  try {
+    const stringSession = new StringSession('');
+    tempClient = new TelegramClient(stringSession, apiId, apiHash, { connectionRetries: 3 });
+    await tempClient.connect();
+
+    const sendCodeResult = await tempClient.sendCode({ apiId, apiHash }, phoneNumber);
+    const requestId = randomUUID();
+    pendingSessionAuth.set(requestId, {
+      id: requestId,
+      client: tempClient,
+      stringSession,
+      apiId,
+      apiHash,
+      phoneNumber,
+      phoneCodeHash: sendCodeResult.phoneCodeHash,
+      createdAt: Date.now(),
+    });
+    tempClient = null;
+
+    res.json({
+      requestId,
+      isCodeViaApp: sendCodeResult.isCodeViaApp,
+      expiresInSeconds: Math.round(SESSION_AUTH_TTL_MS / 1000),
+    });
+  } catch (error) {
+    if (tempClient) {
+      await tempClient.disconnect().catch(() => undefined);
+    }
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+app.post('/api/session/complete', isAdmin, async (req, res) => {
+  const requestId = toStringValue(req.body?.requestId, '').trim();
+  const phoneCode = toStringValue(req.body?.code, '').trim();
+  const password = toStringValue(req.body?.password, '').trim();
+
+  if (!requestId || !phoneCode) {
+    return res.status(400).json({ error: 'requestId and code are required' });
+  }
+
+  const pending = takePendingSessionAuth(requestId);
+  if (!pending) {
+    return res.status(404).json({ error: 'Session request not found or expired. Request a new code.' });
+  }
+
+  try {
+    let needsPassword = false;
+
+    try {
+      const signInResult = await pending.client.invoke(
+        new Api.auth.SignIn({
+          phoneNumber: pending.phoneNumber,
+          phoneCodeHash: pending.phoneCodeHash,
+          phoneCode,
+        })
+      );
+      if (signInResult instanceof Api.auth.AuthorizationSignUpRequired) {
+        await disposePendingSessionAuth(pending);
+        return res.status(400).json({ error: 'Sign up flow is not supported in admin panel' });
+      }
+    } catch (error) {
+      const message = (error as any)?.errorMessage ?? (error as Error).message ?? '';
+      if (message.includes('SESSION_PASSWORD_NEEDED')) {
+        needsPassword = true;
+      } else {
+        throw error;
+      }
+    }
+
+    if (needsPassword) {
+      if (!password) {
+        pendingSessionAuth.set(requestId, {
+          ...pending,
+          createdAt: Date.now(),
+        });
+        return res.status(409).json({ requiresPassword: true, error: '2FA password is required' });
+      }
+
+      try {
+        await pending.client.signInWithPassword(
+          { apiId: pending.apiId, apiHash: pending.apiHash },
+          {
+            password: async () => password,
+            onError: async () => true,
+          }
+        );
+      } catch (error) {
+        const message = (error as Error).message ?? '';
+        if (message.includes('AUTH_USER_CANCEL')) {
+          pendingSessionAuth.set(requestId, {
+            ...pending,
+            createdAt: Date.now(),
+          });
+          return res.status(400).json({ error: 'Invalid 2FA password' });
+        }
+        throw error;
+      }
+    }
+
+    const authorized = await pending.client.checkAuthorization();
+    if (!authorized) {
+      throw new Error('Telegram authorization failed');
+    }
+
+    const sessionString = pending.stringSession.save();
+    await disposePendingSessionAuth(pending);
+    res.json({ sessionString });
+  } catch (error) {
+    await disposePendingSessionAuth(pending);
+    res.status(500).json({ error: (error as Error).message });
+  }
 });
 
 app.post('/api/telegram/chats', isAdmin, async (req, res) => {

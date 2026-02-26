@@ -182,6 +182,13 @@ function SentinelApp() {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [availableChats, setAvailableChats] = useState<AvailableTelegramChat[]>([]);
   const [isLoadingAvailableChats, setIsLoadingAvailableChats] = useState(false);
+  const [sessionPhoneNumber, setSessionPhoneNumber] = useState('');
+  const [sessionRequestId, setSessionRequestId] = useState('');
+  const [sessionCode, setSessionCode] = useState('');
+  const [sessionPassword, setSessionPassword] = useState('');
+  const [sessionNeedsPassword, setSessionNeedsPassword] = useState(false);
+  const [isRequestingSessionCode, setIsRequestingSessionCode] = useState(false);
+  const [isConfirmingSessionCode, setIsConfirmingSessionCode] = useState(false);
   const selectedModel = MODEL_OPTIONS.find((model) => model.id === settings.mlModel) ?? MODEL_OPTIONS[0];
 
   // --- DATA FETCHING ---
@@ -311,6 +318,96 @@ function SentinelApp() {
     }
   };
 
+  const requestSessionCode = async (): Promise<void> => {
+    const apiId = settings.apiId.trim();
+    const apiHash = settings.apiHash.trim();
+    const phoneNumber = sessionPhoneNumber.trim();
+
+    if (!apiId || !apiHash || !phoneNumber) {
+      alert('Fill API ID, API Hash and phone number first.');
+      return;
+    }
+
+    setIsRequestingSessionCode(true);
+    try {
+      const res = await fetch('/api/session/request-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiId, apiHash, phoneNumber }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error ?? 'Failed to request login code');
+      }
+
+      setSessionRequestId(String(data.requestId ?? ''));
+      setSessionCode('');
+      setSessionPassword('');
+      setSessionNeedsPassword(false);
+      alert('Code requested. Enter Telegram login code.');
+    } catch (err) {
+      console.error('Failed to request session code', err);
+      alert(`Failed to request code: ${(err as Error).message}`);
+    } finally {
+      setIsRequestingSessionCode(false);
+    }
+  };
+
+  const confirmSessionCode = async (): Promise<void> => {
+    const requestId = sessionRequestId.trim();
+    const code = sessionCode.trim();
+
+    if (!requestId) {
+      alert('Request code first.');
+      return;
+    }
+    if (!code) {
+      alert('Enter the Telegram code.');
+      return;
+    }
+
+    setIsConfirmingSessionCode(true);
+    try {
+      const res = await fetch('/api/session/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId,
+          code,
+          password: sessionPassword.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (res.status === 409 && data?.requiresPassword) {
+        setSessionNeedsPassword(true);
+        alert('This account has 2FA password. Enter it and confirm again.');
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(data?.error ?? 'Failed to complete authorization');
+      }
+
+      const generated = typeof data?.sessionString === 'string' ? data.sessionString : '';
+      if (!generated) {
+        throw new Error('Empty session string returned');
+      }
+
+      setSettings((prev) => ({ ...prev, sessionString: generated }));
+      setSessionRequestId('');
+      setSessionCode('');
+      setSessionPassword('');
+      setSessionNeedsPassword(false);
+      alert('Session string generated and inserted into settings.');
+    } catch (err) {
+      console.error('Failed to confirm session code', err);
+      alert(`Failed to complete auth: ${(err as Error).message}`);
+    } finally {
+      setIsConfirmingSessionCode(false);
+    }
+  };
+
   useEffect(() => {
     if (!user || user.role !== 'admin') return;
     let cancelled = false;
@@ -348,6 +445,13 @@ function SentinelApp() {
       cancelled = true;
     };
   }, [user]);
+
+  useEffect(() => {
+    setSessionRequestId('');
+    setSessionCode('');
+    setSessionPassword('');
+    setSessionNeedsPassword(false);
+  }, [settings.authMode]);
 
   const saveSettings = async (showNotification = true): Promise<boolean> => {
     if (!user || user.role !== 'admin') return false;
@@ -662,7 +766,7 @@ function SentinelApp() {
                 <p className="text-[11px] text-amber-500 mt-1">Bot mode reads only chats where the bot is added.</p>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Session String</label>
                 <textarea
                   value={settings.sessionString}
@@ -672,6 +776,62 @@ function SentinelApp() {
                   placeholder="Paste Telegram String Session for your account"
                 />
                 <p className="text-[11px] text-amber-500 mt-1">Account mode uses your Telegram account dialogs directly.</p>
+
+                <div className="pt-2 border-t border-slate-800 space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Generate In Panel</label>
+                  <input
+                    type="text"
+                    value={sessionPhoneNumber}
+                    onChange={e => setSessionPhoneNumber(e.target.value)}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono"
+                    placeholder="+79991234567"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void requestSessionCode()}
+                    disabled={isRequestingSessionCode}
+                    className={cn(
+                      "w-full px-3 py-2 rounded-lg border text-sm transition-colors",
+                      isRequestingSessionCode
+                        ? "border-slate-700 text-slate-500 cursor-not-allowed"
+                        : "border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/10"
+                    )}
+                  >
+                    {isRequestingSessionCode ? 'Requesting code...' : 'Send Telegram Code'}
+                  </button>
+
+                  {sessionRequestId && (
+                    <div className="space-y-2 pt-2">
+                      <input
+                        type="text"
+                        value={sessionCode}
+                        onChange={e => setSessionCode(e.target.value)}
+                        className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono"
+                        placeholder="Code from Telegram"
+                      />
+                      <input
+                        type="password"
+                        value={sessionPassword}
+                        onChange={e => setSessionPassword(e.target.value)}
+                        className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono"
+                        placeholder={sessionNeedsPassword ? '2FA password (required)' : '2FA password (if enabled)'}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void confirmSessionCode()}
+                        disabled={isConfirmingSessionCode}
+                        className={cn(
+                          "w-full px-3 py-2 rounded-lg border text-sm transition-colors",
+                          isConfirmingSessionCode
+                            ? "border-slate-700 text-slate-500 cursor-not-allowed"
+                            : "border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/10"
+                        )}
+                      >
+                        {isConfirmingSessionCode ? 'Confirming...' : 'Confirm And Generate Session'}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
