@@ -113,6 +113,66 @@ const MODEL_OPTIONS: ModelOption[] = [
   },
 ];
 
+const DEFAULT_SCAM_TRIGGERS = [
+  'скам',
+  'мошенник',
+  'мошенничество',
+  'развод',
+  'обман',
+  'фишинг',
+  'быстрый заработок',
+  'гарантированный доход',
+  'пассивный доход',
+  'переведи usdt',
+  'seed phrase',
+  'сид фраза',
+  'wallet connect',
+  'предоплата',
+  'арбитраж',
+  'инвестируй сейчас',
+];
+const DEFAULT_DRUG_TRIGGERS = [
+  'наркотик',
+  'наркота',
+  'закладка',
+  'кладмен',
+  'меф',
+  'мефедрон',
+  'амф',
+  'амфетамин',
+  'кокаин',
+  'героин',
+  'марихуана',
+  'спайс',
+  'соль',
+  'mdma',
+  'экстази',
+];
+const DEFAULT_THREAT_TRIGGERS = [
+  'убью',
+  'взорву',
+  'зарежу',
+  'расстреляю',
+  'смерть',
+  'бомба',
+  'оружие',
+  'угроза',
+  'теракт',
+  'нападу',
+];
+const DEFAULT_TOXICITY_TRIGGERS = [
+  'идиот',
+  'дебил',
+  'тварь',
+  'мразь',
+  'чмо',
+  'сука',
+  'урод',
+  'пидор',
+  'оскорбление',
+  'ненавижу',
+];
+
 type SettingsState = {
   apiId: string;
   apiHash: string;
@@ -135,8 +195,22 @@ type SettingsState = {
   mediaTypes: { photo: boolean; video: boolean; document: boolean; audio: boolean };
   keywords: string[];
   newKeywordInput: string;
+  scamTriggers: string[];
+  drugTriggers: string[];
+  threatTriggers: string[];
+  toxicityTriggers: string[];
   mlModel: string;
   threatThreshold: number;
+  categoryThresholds: { toxicity: number; threat: number; scam: number };
+  enableHeuristics: boolean;
+  enableCriticalPatterns: boolean;
+  modelWeight: number;
+  heuristicWeight: number;
+  modelTopK: number;
+  maxAnalysisChars: number;
+  urlScamBoost: number;
+  keywordHitBoost: number;
+  criticalHitFloor: number;
 };
 
 type AvailableTelegramChat = {
@@ -146,7 +220,18 @@ type AvailableTelegramChat = {
   type: 'group' | 'supergroup' | 'channel';
   avatar: string | null;
 };
-type CooldownKey = 'saveSettings' | 'syncChats' | 'sessionCode' | 'sessionConfirm' | 'engineControl';
+type EngineTestResult = {
+  text: string;
+  expected: string | null;
+  scenario: string;
+  type: 'safe' | 'toxicity' | 'threat' | 'scam';
+  confidence: number;
+  scores: { toxicity: number; threat: number; scam: number };
+  heuristicScores: { toxicity: number; threat: number; scam: number };
+  modelScores: { toxicity: number; threat: number; scam: number };
+  thresholds: { toxicity: number; threat: number; scam: number };
+};
+type CooldownKey = 'saveSettings' | 'syncChats' | 'sessionCode' | 'sessionConfirm' | 'engineControl' | 'engineTest';
 type ActiveTab = 'dashboard' | 'agents' | 'engine' | 'proxy' | 'logs';
 
 const DEFAULT_SETTINGS: SettingsState = {
@@ -169,10 +254,24 @@ const DEFAULT_SETTINGS: SettingsState = {
   proxyPass: '',
   downloadMedia: false,
   mediaTypes: { photo: true, video: false, document: false, audio: false },
-  keywords: ['crypto', 'hack', 'buy', 'sell', 'leak'],
+  keywords: ['crypto', 'invest', 'wallet', 'usdt', 'btc', 'перевод', 'кошелек'],
   newKeywordInput: '',
+  scamTriggers: [...DEFAULT_SCAM_TRIGGERS],
+  drugTriggers: [...DEFAULT_DRUG_TRIGGERS],
+  threatTriggers: [...DEFAULT_THREAT_TRIGGERS],
+  toxicityTriggers: [...DEFAULT_TOXICITY_TRIGGERS],
   mlModel: MODEL_OPTIONS[0].id,
   threatThreshold: 75,
+  categoryThresholds: { toxicity: 72, threat: 72, scam: 70 },
+  enableHeuristics: true,
+  enableCriticalPatterns: true,
+  modelWeight: 58,
+  heuristicWeight: 42,
+  modelTopK: 12,
+  maxAnalysisChars: 1400,
+  urlScamBoost: 24,
+  keywordHitBoost: 16,
+  criticalHitFloor: 84,
 };
 
 function normalizeChatList(value: unknown): string[] {
@@ -216,6 +315,60 @@ function resolveTargetChatsForMode(
   return [...fallback];
 }
 
+function normalizeTriggerArray(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) return [...fallback];
+  const unique = new Set<string>();
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const normalized = item.trim();
+    if (!normalized || unique.has(normalized.toLowerCase())) continue;
+    unique.add(normalized.toLowerCase());
+    result.push(normalized);
+  }
+  return result;
+}
+
+function triggerArrayToText(value: string[]): string {
+  return value.join('\n');
+}
+
+function triggerTextToArray(value: string): string[] {
+  const unique = new Set<string>();
+  const result: string[] = [];
+  for (const chunk of value.split(/\r?\n|,/g)) {
+    const normalized = chunk.trim();
+    if (!normalized || unique.has(normalized.toLowerCase())) continue;
+    unique.add(normalized.toLowerCase());
+    result.push(normalized);
+  }
+  return result;
+}
+
+function messagesTextToArray(value: string): string[] {
+  const result: string[] = [];
+  for (const line of value.split(/\r?\n/g)) {
+    const normalized = line.trim();
+    if (!normalized) continue;
+    result.push(normalized);
+  }
+  return result;
+}
+
+function clampPercent(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function numberOrFallback(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
 // --- MAIN APP COMPONENT ---
 function SentinelApp() {
   const { user, logout } = useAuth();
@@ -247,7 +400,13 @@ function SentinelApp() {
     sessionCode: 0,
     sessionConfirm: 0,
     engineControl: 0,
+    engineTest: 0,
   });
+  const [engineTestInput, setEngineTestInput] = useState('');
+  const [engineTestResults, setEngineTestResults] = useState<EngineTestResult[]>([]);
+  const [engineTestSummary, setEngineTestSummary] = useState<{ safe: number; toxicity: number; threat: number; scam: number } | null>(null);
+  const [isRunningEngineTest, setIsRunningEngineTest] = useState(false);
+  const [engineTestUsedDefaultSet, setEngineTestUsedDefaultSet] = useState(false);
   const selectedModel = MODEL_OPTIONS.find((model) => model.id === settings.mlModel) ?? MODEL_OPTIONS[0];
   const availableChats = availableChatsByMode[settings.authMode];
 
@@ -294,6 +453,7 @@ function SentinelApp() {
           sessionCode: Math.max(0, prev.sessionCode - 1),
           sessionConfirm: Math.max(0, prev.sessionConfirm - 1),
           engineControl: Math.max(0, prev.engineControl - 1),
+          engineTest: Math.max(0, prev.engineTest - 1),
         };
         return next;
       });
@@ -321,8 +481,42 @@ function SentinelApp() {
     downloadMedia: source.downloadMedia,
     mediaTypes: source.mediaTypes,
     keywords: source.keywords,
+    scamTriggers: source.scamTriggers,
+    drugTriggers: source.drugTriggers,
+    threatTriggers: source.threatTriggers,
+    toxicityTriggers: source.toxicityTriggers,
     mlModel: source.mlModel,
     threatThreshold: source.threatThreshold,
+    categoryThresholds: source.categoryThresholds,
+    enableHeuristics: source.enableHeuristics,
+    enableCriticalPatterns: source.enableCriticalPatterns,
+    modelWeight: source.modelWeight,
+    heuristicWeight: source.heuristicWeight,
+    modelTopK: source.modelTopK,
+    maxAnalysisChars: source.maxAnalysisChars,
+    urlScamBoost: source.urlScamBoost,
+    keywordHitBoost: source.keywordHitBoost,
+    criticalHitFloor: source.criticalHitFloor,
+  });
+
+  const toEngineSettingsPayload = (source: SettingsState) => ({
+    keywords: source.keywords,
+    scamTriggers: source.scamTriggers,
+    drugTriggers: source.drugTriggers,
+    threatTriggers: source.threatTriggers,
+    toxicityTriggers: source.toxicityTriggers,
+    mlModel: source.mlModel,
+    threatThreshold: source.threatThreshold,
+    categoryThresholds: source.categoryThresholds,
+    enableHeuristics: source.enableHeuristics,
+    enableCriticalPatterns: source.enableCriticalPatterns,
+    modelWeight: source.modelWeight,
+    heuristicWeight: source.heuristicWeight,
+    modelTopK: source.modelTopK,
+    maxAnalysisChars: source.maxAnalysisChars,
+    urlScamBoost: source.urlScamBoost,
+    keywordHitBoost: source.keywordHitBoost,
+    criticalHitFloor: source.criticalHitFloor,
   });
 
   const startCooldown = (key: CooldownKey, seconds: number): void => {
@@ -378,7 +572,25 @@ function SentinelApp() {
       botTargetChats,
       userTargetChats,
       targetChats: authMode === 'bot' ? botTargetChats : userTargetChats,
-      keywords: Array.isArray(saved?.keywords) ? saved.keywords : prev.keywords,
+      keywords: normalizeTriggerArray(saved?.keywords, prev.keywords),
+      scamTriggers: normalizeTriggerArray(saved?.scamTriggers, prev.scamTriggers),
+      drugTriggers: normalizeTriggerArray(saved?.drugTriggers, prev.drugTriggers),
+      threatTriggers: normalizeTriggerArray(saved?.threatTriggers, prev.threatTriggers),
+      toxicityTriggers: normalizeTriggerArray(saved?.toxicityTriggers, prev.toxicityTriggers),
+      categoryThresholds: {
+        toxicity: clampPercent(numberOrFallback(saved?.categoryThresholds?.toxicity, prev.categoryThresholds.toxicity), 1, 99),
+        threat: clampPercent(numberOrFallback(saved?.categoryThresholds?.threat, prev.categoryThresholds.threat), 1, 99),
+        scam: clampPercent(numberOrFallback(saved?.categoryThresholds?.scam, prev.categoryThresholds.scam), 1, 99),
+      },
+      enableHeuristics: typeof saved?.enableHeuristics === 'boolean' ? saved.enableHeuristics : prev.enableHeuristics,
+      enableCriticalPatterns: typeof saved?.enableCriticalPatterns === 'boolean' ? saved.enableCriticalPatterns : prev.enableCriticalPatterns,
+      modelWeight: clampPercent(numberOrFallback(saved?.modelWeight, prev.modelWeight), 0, 100),
+      heuristicWeight: clampPercent(numberOrFallback(saved?.heuristicWeight, prev.heuristicWeight), 0, 100),
+      modelTopK: clampPercent(numberOrFallback(saved?.modelTopK, prev.modelTopK), 1, 30),
+      maxAnalysisChars: clampPercent(numberOrFallback(saved?.maxAnalysisChars, prev.maxAnalysisChars), 200, 4000),
+      urlScamBoost: clampPercent(numberOrFallback(saved?.urlScamBoost, prev.urlScamBoost), 0, 100),
+      keywordHitBoost: clampPercent(numberOrFallback(saved?.keywordHitBoost, prev.keywordHitBoost), 0, 100),
+      criticalHitFloor: clampPercent(numberOrFallback(saved?.criticalHitFloor, prev.criticalHitFloor), 0, 100),
       mediaTypes: {
         ...prev.mediaTypes,
         ...(saved?.mediaTypes ?? {}),
@@ -723,6 +935,89 @@ function SentinelApp() {
     } catch (err) {
       console.error('Failed to toggle engine', err);
       alert('Сетевая ошибка при переключении движка');
+    }
+  };
+
+  const runEngineSelfTest = async (): Promise<void> => {
+    if (!user || user.role !== 'admin') return;
+    if (cooldowns.engineTest > 0) {
+      alert(`Engine test cooldown: ${cooldownText('engineTest')}`);
+      return;
+    }
+
+    const customMessages = messagesTextToArray(engineTestInput).slice(0, 80);
+    setIsRunningEngineTest(true);
+
+    try {
+      const res = await fetch('/api/engine/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          settings: toEngineSettingsPayload(settings),
+          messages: customMessages,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const cooldownSeconds = extractCooldownSeconds(res, data);
+        if (cooldownSeconds > 0) {
+          startCooldown('engineTest', cooldownSeconds);
+        }
+        throw new Error(data?.error ?? 'Engine self-test failed');
+      }
+
+      const results: EngineTestResult[] = Array.isArray(data?.results)
+        ? data.results
+            .filter((item: any) => item && typeof item.text === 'string')
+            .map((item: any) => ({
+              text: item.text,
+              expected: typeof item.expected === 'string' ? item.expected : null,
+              scenario: typeof item.scenario === 'string' ? item.scenario : 'custom',
+              type:
+                item.type === 'safe' || item.type === 'toxicity' || item.type === 'threat' || item.type === 'scam'
+                  ? item.type
+                  : 'safe',
+              confidence: clampPercent(numberOrFallback(item.confidence, 0), 0, 100),
+              scores: {
+                toxicity: clampPercent(numberOrFallback(item?.scores?.toxicity, 0), 0, 100),
+                threat: clampPercent(numberOrFallback(item?.scores?.threat, 0), 0, 100),
+                scam: clampPercent(numberOrFallback(item?.scores?.scam, 0), 0, 100),
+              },
+              heuristicScores: {
+                toxicity: clampPercent(numberOrFallback(item?.heuristicScores?.toxicity, 0), 0, 100),
+                threat: clampPercent(numberOrFallback(item?.heuristicScores?.threat, 0), 0, 100),
+                scam: clampPercent(numberOrFallback(item?.heuristicScores?.scam, 0), 0, 100),
+              },
+              modelScores: {
+                toxicity: clampPercent(numberOrFallback(item?.modelScores?.toxicity, 0), 0, 100),
+                threat: clampPercent(numberOrFallback(item?.modelScores?.threat, 0), 0, 100),
+                scam: clampPercent(numberOrFallback(item?.modelScores?.scam, 0), 0, 100),
+              },
+              thresholds: {
+                toxicity: clampPercent(numberOrFallback(item?.thresholds?.toxicity, 0), 0, 100),
+                threat: clampPercent(numberOrFallback(item?.thresholds?.threat, 0), 0, 100),
+                scam: clampPercent(numberOrFallback(item?.thresholds?.scam, 0), 0, 100),
+              },
+            }))
+        : [];
+
+      setEngineTestResults(results);
+      setEngineTestSummary(
+        data?.summary && typeof data.summary === 'object'
+          ? {
+              safe: clampPercent(numberOrFallback((data.summary as any).safe, 0), 0, 10000),
+              toxicity: clampPercent(numberOrFallback((data.summary as any).toxicity, 0), 0, 10000),
+              threat: clampPercent(numberOrFallback((data.summary as any).threat, 0), 0, 10000),
+              scam: clampPercent(numberOrFallback((data.summary as any).scam, 0), 0, 10000),
+            }
+          : null
+      );
+      setEngineTestUsedDefaultSet(Boolean(data?.usedDefaultDataset));
+    } catch (error) {
+      console.error('Failed to run engine self-test', error);
+      alert(`Engine self-test failed: ${(error as Error).message}`);
+    } finally {
+      setIsRunningEngineTest(false);
     }
   };
 
@@ -1309,7 +1604,7 @@ function SentinelApp() {
               <MessageSquare className="w-5 h-5 mr-3 text-amber-400" />
               <h2 className="text-base font-semibold text-slate-200">Триггеры по ключевым словам</h2>
             </div>
-            <div className="p-6 flex-1 flex flex-col">
+            <div className="p-6 flex-1 flex flex-col space-y-5">
               <div className="flex space-x-2 mb-4">
                 <input 
                   type="text" 
@@ -1335,6 +1630,45 @@ function SentinelApp() {
                     </button>
                   </span>
                 ))}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Scam triggers</label>
+                  <textarea
+                    rows={7}
+                    value={triggerArrayToText(settings.scamTriggers)}
+                    onChange={(e) => setSettings((prev) => ({ ...prev, scamTriggers: triggerTextToArray(e.target.value) }))}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500 font-mono"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Drug triggers</label>
+                  <textarea
+                    rows={7}
+                    value={triggerArrayToText(settings.drugTriggers)}
+                    onChange={(e) => setSettings((prev) => ({ ...prev, drugTriggers: triggerTextToArray(e.target.value) }))}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500 font-mono"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Threat triggers</label>
+                  <textarea
+                    rows={7}
+                    value={triggerArrayToText(settings.threatTriggers)}
+                    onChange={(e) => setSettings((prev) => ({ ...prev, threatTriggers: triggerTextToArray(e.target.value) }))}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500 font-mono"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Toxicity triggers</label>
+                  <textarea
+                    rows={7}
+                    value={triggerArrayToText(settings.toxicityTriggers)}
+                    onChange={(e) => setSettings((prev) => ({ ...prev, toxicityTriggers: triggerTextToArray(e.target.value) }))}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500 font-mono"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -1457,84 +1791,338 @@ function SentinelApp() {
         )}
 
         {section === 'engine' && (
-        <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center">
-            <Cpu className="w-5 h-5 mr-3 text-violet-400" />
-            <h2 className="text-base font-semibold text-slate-200">Движок анализа</h2>
-          </div>
-          <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Model (local ONNX)</label>
-                <select 
-                  value={settings.mlModel}
-                  onChange={e => setSettings({...settings, mlModel: e.target.value})}
-                  className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500 font-mono"
-                >
-                  {MODEL_OPTIONS.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3">
-                  <p className="text-xs text-slate-300">{selectedModel.summary}</p>
-                  <p className="text-[11px] text-slate-500 mt-2">Best for: {selectedModel.bestFor}</p>
+        <div className="space-y-6">
+          <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center">
+              <Cpu className="w-5 h-5 mr-3 text-violet-400" />
+              <h2 className="text-base font-semibold text-slate-200">Engine Core</h2>
+            </div>
+            <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Model (local ONNX)</label>
+                  <select
+                    value={settings.mlModel}
+                    onChange={e => setSettings({...settings, mlModel: e.target.value})}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500 font-mono"
+                  >
+                    {MODEL_OPTIONS.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3">
+                    <p className="text-xs text-slate-300">{selectedModel.summary}</p>
+                    <p className="text-[11px] text-slate-500 mt-2">Best for: {selectedModel.bestFor}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Global alert threshold</label>
+                    <span className="text-xs font-mono text-violet-400">{settings.threatThreshold}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="99"
+                    value={settings.threatThreshold}
+                    onChange={e => setSettings({...settings, threatThreshold: clampPercent(Number(e.target.value), 1, 99)})}
+                    className="w-full accent-violet-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="flex items-center justify-between rounded-lg border border-slate-800 bg-[#0A0A0B] px-3 py-2">
+                    <span className="text-xs text-slate-300">Use heuristics</span>
+                    <input
+                      type="checkbox"
+                      checked={settings.enableHeuristics}
+                      onChange={() => setSettings((prev) => ({ ...prev, enableHeuristics: !prev.enableHeuristics }))}
+                      className="h-4 w-4 accent-violet-500"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between rounded-lg border border-slate-800 bg-[#0A0A0B] px-3 py-2">
+                    <span className="text-xs text-slate-300">Use critical patterns</span>
+                    <input
+                      type="checkbox"
+                      checked={settings.enableCriticalPatterns}
+                      onChange={() => setSettings((prev) => ({ ...prev, enableCriticalPatterns: !prev.enableCriticalPatterns }))}
+                      className="h-4 w-4 accent-violet-500"
+                    />
+                  </label>
                 </div>
               </div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Порог оповещения</label>
-                  <span className="text-xs font-mono text-violet-400">{settings.threatThreshold}%</span>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Model weight</label>
+                    <span className="text-xs font-mono text-slate-300">{settings.modelWeight}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={settings.modelWeight}
+                    onChange={e => setSettings((prev) => ({ ...prev, modelWeight: clampPercent(Number(e.target.value), 0, 100) }))}
+                    className="w-full accent-violet-500"
+                  />
                 </div>
-                <input 
-                  type="range" 
-                  min="1" max="99" 
-                  value={settings.threatThreshold}
-                  onChange={e => setSettings({...settings, threatThreshold: parseInt(e.target.value)})}
-                  className="w-full accent-violet-500"
-                />
-                <p className="text-[11px] text-slate-500">Срабатывать только в том случае, если показатель уверенности превышает это значение.</p>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Heuristic weight</label>
+                    <span className="text-xs font-mono text-slate-300">{settings.heuristicWeight}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={settings.heuristicWeight}
+                    onChange={e => setSettings((prev) => ({ ...prev, heuristicWeight: clampPercent(Number(e.target.value), 0, 100) }))}
+                    className="w-full accent-violet-500"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Model top-k</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={settings.modelTopK}
+                      onChange={(e) => setSettings((prev) => ({ ...prev, modelTopK: clampPercent(numberOrFallback(e.target.value, prev.modelTopK), 1, 30) }))}
+                      className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Max chars</label>
+                    <input
+                      type="number"
+                      min={200}
+                      max={4000}
+                      value={settings.maxAnalysisChars}
+                      onChange={(e) => setSettings((prev) => ({ ...prev, maxAnalysisChars: clampPercent(numberOrFallback(e.target.value, prev.maxAnalysisChars), 200, 4000) }))}
+                      className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
+          </div>
 
-            <div className="space-y-4">
-              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Обработка медиа</label>
-              <div className="space-y-3">
-                <label className="flex items-center cursor-pointer">
-                  <div className="relative">
-                    <input 
-                      type="checkbox" 
-                      className="sr-only" 
-                      checked={settings.downloadMedia}
-                      onChange={() => setSettings({...settings, downloadMedia: !settings.downloadMedia})}
+          <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30">
+              <h3 className="text-sm font-semibold text-slate-200">Category thresholds and boosts</h3>
+            </div>
+            <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Toxicity %</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={99}
+                      value={settings.categoryThresholds.toxicity}
+                      onChange={(e) => setSettings((prev) => ({
+                        ...prev,
+                        categoryThresholds: {
+                          ...prev.categoryThresholds,
+                          toxicity: clampPercent(numberOrFallback(e.target.value, prev.categoryThresholds.toxicity), 1, 99),
+                        },
+                      }))}
+                      className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500"
                     />
-                    <div className={cn("block w-10 h-6 rounded-full transition-colors", settings.downloadMedia ? "bg-violet-500" : "bg-slate-700")}></div>
-                    <div className={cn("dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform", settings.downloadMedia ? "transform translate-x-4" : "")}></div>
                   </div>
-                  <span className="ml-3 text-sm font-medium text-slate-300">Скачивать медиа для анализа</span>
-                </label>
-                
-                {settings.downloadMedia && (
-                  <div className="pl-12 grid grid-cols-2 gap-3 animate-in fade-in duration-200">
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input type="checkbox" checked={settings.mediaTypes.photo} onChange={e => setSettings(s => ({...s, mediaTypes: {...s.mediaTypes, photo: e.target.checked}}))} className="rounded border-slate-700 text-violet-500 focus:ring-violet-500 bg-[#0A0A0B]" />
-                      <ImageIcon className="w-4 h-4 text-slate-400" />
-                      <span className="text-sm text-slate-300">Фото (OCR)</span>
-                    </label>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input type="checkbox" checked={settings.mediaTypes.video} onChange={e => setSettings(s => ({...s, mediaTypes: {...s.mediaTypes, video: e.target.checked}}))} className="rounded border-slate-700 text-violet-500 focus:ring-violet-500 bg-[#0A0A0B]" />
-                      <Video className="w-4 h-4 text-slate-400" />
-                      <span className="text-sm text-slate-300">Видео</span>
-                    </label>
-                    <label className="flex items-center space-x-2 cursor-pointer">
-                      <input type="checkbox" checked={settings.mediaTypes.document} onChange={e => setSettings(s => ({...s, mediaTypes: {...s.mediaTypes, document: e.target.checked}}))} className="rounded border-slate-700 text-violet-500 focus:ring-violet-500 bg-[#0A0A0B]" />
-                      <FileText className="w-4 h-4 text-slate-400" />
-                      <span className="text-sm text-slate-300">Документы</span>
-                    </label>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Threat %</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={99}
+                      value={settings.categoryThresholds.threat}
+                      onChange={(e) => setSettings((prev) => ({
+                        ...prev,
+                        categoryThresholds: {
+                          ...prev.categoryThresholds,
+                          threat: clampPercent(numberOrFallback(e.target.value, prev.categoryThresholds.threat), 1, 99),
+                        },
+                      }))}
+                      className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500"
+                    />
                   </div>
-                )}
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Scam %</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={99}
+                      value={settings.categoryThresholds.scam}
+                      onChange={(e) => setSettings((prev) => ({
+                        ...prev,
+                        categoryThresholds: {
+                          ...prev.categoryThresholds,
+                          scam: clampPercent(numberOrFallback(e.target.value, prev.categoryThresholds.scam), 1, 99),
+                        },
+                      }))}
+                      className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">URL scam boost</label>
+                    <span className="text-xs font-mono text-slate-300">{settings.urlScamBoost}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={settings.urlScamBoost}
+                    onChange={e => setSettings((prev) => ({ ...prev, urlScamBoost: clampPercent(Number(e.target.value), 0, 100) }))}
+                    className="w-full accent-violet-500"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Keyword hit boost</label>
+                    <span className="text-xs font-mono text-slate-300">{settings.keywordHitBoost}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={settings.keywordHitBoost}
+                    onChange={e => setSettings((prev) => ({ ...prev, keywordHitBoost: clampPercent(Number(e.target.value), 0, 100) }))}
+                    className="w-full accent-violet-500"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Critical hit floor</label>
+                    <span className="text-xs font-mono text-slate-300">{settings.criticalHitFloor}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={settings.criticalHitFloor}
+                    onChange={e => setSettings((prev) => ({ ...prev, criticalHitFloor: clampPercent(Number(e.target.value), 0, 100) }))}
+                    className="w-full accent-violet-500"
+                  />
+                </div>
               </div>
+
+              <div className="space-y-4">
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Media processing</label>
+                <div className="space-y-3">
+                  <label className="flex items-center cursor-pointer">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={settings.downloadMedia}
+                        onChange={() => setSettings({...settings, downloadMedia: !settings.downloadMedia})}
+                      />
+                      <div className={cn("block w-10 h-6 rounded-full transition-colors", settings.downloadMedia ? "bg-violet-500" : "bg-slate-700")}></div>
+                      <div className={cn("dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform", settings.downloadMedia ? "transform translate-x-4" : "")}></div>
+                    </div>
+                    <span className="ml-3 text-sm font-medium text-slate-300">Download media for analysis</span>
+                  </label>
+
+                  {settings.downloadMedia && (
+                    <div className="pl-12 grid grid-cols-2 gap-3 animate-in fade-in duration-200">
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" checked={settings.mediaTypes.photo} onChange={e => setSettings(s => ({...s, mediaTypes: {...s.mediaTypes, photo: e.target.checked}}))} className="rounded border-slate-700 text-violet-500 focus:ring-violet-500 bg-[#0A0A0B]" />
+                        <ImageIcon className="w-4 h-4 text-slate-400" />
+                        <span className="text-sm text-slate-300">Photo (OCR)</span>
+                      </label>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" checked={settings.mediaTypes.video} onChange={e => setSettings(s => ({...s, mediaTypes: {...s.mediaTypes, video: e.target.checked}}))} className="rounded border-slate-700 text-violet-500 focus:ring-violet-500 bg-[#0A0A0B]" />
+                        <Video className="w-4 h-4 text-slate-400" />
+                        <span className="text-sm text-slate-300">Video</span>
+                      </label>
+                      <label className="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" checked={settings.mediaTypes.document} onChange={e => setSettings(s => ({...s, mediaTypes: {...s.mediaTypes, document: e.target.checked}}))} className="rounded border-slate-700 text-violet-500 focus:ring-violet-500 bg-[#0A0A0B]" />
+                        <FileText className="w-4 h-4 text-slate-400" />
+                        <span className="text-sm text-slate-300">Documents</span>
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-200">Engine self-test</h3>
+              <button
+                type="button"
+                onClick={() => void runEngineSelfTest()}
+                disabled={isRunningEngineTest || cooldowns.engineTest > 0}
+                className={cn(
+                  "px-3 py-2 rounded-lg border text-xs font-medium transition-colors",
+                  isRunningEngineTest || cooldowns.engineTest > 0
+                    ? "border-slate-700 text-slate-500 cursor-not-allowed"
+                    : "border-violet-500/20 text-violet-300 hover:bg-violet-500/10"
+                )}
+              >
+                {isRunningEngineTest
+                  ? 'Running...'
+                  : cooldowns.engineTest > 0
+                    ? 'Cooldown ' + cooldownText('engineTest')
+                    : 'Run Self-Test'}
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Custom test messages (optional)</label>
+                <textarea
+                  rows={5}
+                  value={engineTestInput}
+                  onChange={(e) => setEngineTestInput(e.target.value)}
+                  className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-violet-500 font-mono"
+                  placeholder={'One message per line. If empty, built-in dataset is used.'}
+                />
+                <p className="text-[11px] text-slate-500">
+                  {engineTestUsedDefaultSet ? 'Last run used built-in generated dataset.' : 'Last run used custom messages from this field.'}
+                </p>
+              </div>
+
+              {engineTestSummary && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 text-xs text-slate-300">Safe: {engineTestSummary.safe}</div>
+                  <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 text-xs text-amber-300">Toxicity: {engineTestSummary.toxicity}</div>
+                  <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 text-xs text-red-300">Threat: {engineTestSummary.threat}</div>
+                  <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 text-xs text-violet-300">Scam: {engineTestSummary.scam}</div>
+                </div>
+              )}
+
+              {engineTestResults.length > 0 && (
+                <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+                  {engineTestResults.map((result, index) => (
+                    <div key={result.text + '-' + index} className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-xs text-slate-400 uppercase tracking-wider">{result.scenario}</span>
+                        <span className="text-xs text-slate-200 font-mono">{result.type} {result.confidence}%</span>
+                      </div>
+                      {result.expected && (
+                        <div className="text-[11px] text-slate-500 mt-1">Expected: {result.expected}</div>
+                      )}
+                      <pre className="mt-2 text-xs text-slate-300 whitespace-pre-wrap break-words font-sans">{result.text}</pre>
+                      <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-slate-400">
+                        <div>Tox {result.scores.toxicity}% / thr {result.thresholds.toxicity}%</div>
+                        <div>Threat {result.scores.threat}% / thr {result.thresholds.threat}%</div>
+                        <div>Scam {result.scores.scam}% / thr {result.thresholds.scam}%</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

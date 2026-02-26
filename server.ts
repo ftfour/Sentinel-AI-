@@ -34,6 +34,11 @@ const SETTINGS_FILE = path.join(RUNTIME_DIR, 'admin-settings.json');
 type UserRole = 'admin' | 'viewer';
 type UserStore = Record<string, { password: string; role: UserRole }>;
 type TelegramAuthMode = 'bot' | 'user';
+type EngineCategoryThresholds = {
+  toxicity: number;
+  threat: number;
+  scam: number;
+};
 type PersistedAppSettings = {
   apiId: string;
   apiHash: string;
@@ -59,8 +64,22 @@ type PersistedAppSettings = {
     audio: boolean;
   };
   keywords: string[];
+  scamTriggers: string[];
+  drugTriggers: string[];
+  threatTriggers: string[];
+  toxicityTriggers: string[];
   mlModel: string;
   threatThreshold: number; // 1..99
+  categoryThresholds: EngineCategoryThresholds;
+  enableHeuristics: boolean;
+  enableCriticalPatterns: boolean;
+  modelWeight: number; // 0..100
+  heuristicWeight: number; // 0..100
+  modelTopK: number; // 1..30
+  maxAnalysisChars: number; // 200..4000
+  urlScamBoost: number; // 0..100
+  keywordHitBoost: number; // 0..100
+  criticalHitFloor: number; // 0..100
 };
 type TelegramUserCredentials = {
   apiId: number;
@@ -153,6 +172,14 @@ const MAX_RECENT_MESSAGES = 300;
 type ThreatType = 'safe' | 'toxicity' | 'threat' | 'scam';
 type RiskCategory = Exclude<ThreatType, 'safe'>;
 type RiskScores = Record<RiskCategory, number>;
+type AnalyzeThreatResult = {
+  type: ThreatType;
+  score: number;
+  scores: RiskScores;
+  heuristicScores: RiskScores;
+  modelScores: RiskScores;
+  thresholds: RiskScores;
+};
 type LabelScore = { label: string; score: number };
 type LocalOnnxOptions = {
   model_file_name?: string;
@@ -222,6 +249,98 @@ const MODEL_CONFIGS: Record<string, ThreatModelConfig> = {
   },
 };
 const DEFAULT_MODEL_ID = 'local/rubert-tiny-balanced';
+const DEFAULT_CATEGORY_THRESHOLDS: EngineCategoryThresholds = {
+  toxicity: 72,
+  threat: 72,
+  scam: 70,
+};
+const DEFAULT_SCAM_TRIGGERS = [
+  'скам',
+  'мошенник',
+  'мошенничество',
+  'развод',
+  'обман',
+  'фишинг',
+  'быстрый заработок',
+  'гарантированный доход',
+  'пассивный доход',
+  'раскрутка счета',
+  'переведи usdt',
+  'seed phrase',
+  'сид фраза',
+  'wallet connect',
+  'подтверди кошелек',
+  'арбитраж',
+  'предоплата',
+  'успей купить',
+  'бот для дохода',
+  'инвестируй сейчас',
+];
+const DEFAULT_DRUG_TRIGGERS = [
+  'наркотик',
+  'наркота',
+  'закладка',
+  'кладмен',
+  'меф',
+  'мефедрон',
+  'амф',
+  'амфетамин',
+  'кокс',
+  'кокаин',
+  'героин',
+  'гашиш',
+  'марихуана',
+  'каннабис',
+  'спайс',
+  'соль',
+  'mdma',
+  'экстази',
+  'weed',
+  'доставка вещества',
+];
+const DEFAULT_THREAT_TRIGGERS = [
+  'убью',
+  'взорву',
+  'зарежу',
+  'расстреляю',
+  'смерть',
+  'теракт',
+  'бомба',
+  'оружие',
+  'нападу',
+  'подожгу',
+  'угроза',
+];
+const DEFAULT_TOXICITY_TRIGGERS = [
+  'идиот',
+  'дебил',
+  'тварь',
+  'мразь',
+  'чмо',
+  'сука',
+  'урод',
+  'пидор',
+  'оскорбление',
+  'ненавижу',
+  'пошел нах',
+];
+type EngineSelfTestCase = {
+  text: string;
+  expected: ThreatType;
+  scenario: string;
+};
+const ENGINE_SELF_TEST_MESSAGES: EngineSelfTestCase[] = [
+  { scenario: 'safe', expected: 'safe', text: 'Добрый день, пришлите отчет за сегодня до 18:00.' },
+  { scenario: 'safe', expected: 'safe', text: 'Подтверди, пожалуйста, время встречи в пятницу.' },
+  { scenario: 'toxicity', expected: 'toxicity', text: 'Ты просто идиот и ведешь себя как тварь.' },
+  { scenario: 'toxicity', expected: 'toxicity', text: 'Какой же ты дебил, не пиши мне.' },
+  { scenario: 'threat', expected: 'threat', text: 'Я тебя убью, если еще раз так сделаешь.' },
+  { scenario: 'threat', expected: 'threat', text: 'Взорву ваш офис, это прямая угроза.' },
+  { scenario: 'threat', expected: 'threat', text: 'Есть закладка, соль и меф, нужна доставка?' },
+  { scenario: 'scam', expected: 'scam', text: 'Гарантированный доход 30% в день, переведи usdt на кошелек.' },
+  { scenario: 'scam', expected: 'scam', text: 'Срочно отправь seed phrase для верификации wallet.' },
+  { scenario: 'scam', expected: 'scam', text: 'Инвестируй сейчас, без риска, x5 за неделю.' },
+];
 const DEFAULT_PERSISTED_SETTINGS: PersistedAppSettings = {
   apiId: '',
   apiHash: '',
@@ -246,9 +365,23 @@ const DEFAULT_PERSISTED_SETTINGS: PersistedAppSettings = {
     document: false,
     audio: false,
   },
-  keywords: ['crypto', 'hack', 'buy', 'sell', 'leak'],
+  keywords: ['crypto', 'invest', 'wallet', 'usdt', 'btc', 'перевод', 'кошелек'],
+  scamTriggers: [...DEFAULT_SCAM_TRIGGERS],
+  drugTriggers: [...DEFAULT_DRUG_TRIGGERS],
+  threatTriggers: [...DEFAULT_THREAT_TRIGGERS],
+  toxicityTriggers: [...DEFAULT_TOXICITY_TRIGGERS],
   mlModel: DEFAULT_MODEL_ID,
   threatThreshold: 75,
+  categoryThresholds: { ...DEFAULT_CATEGORY_THRESHOLDS },
+  enableHeuristics: true,
+  enableCriticalPatterns: true,
+  modelWeight: 58,
+  heuristicWeight: 42,
+  modelTopK: 12,
+  maxAnalysisChars: 1400,
+  urlScamBoost: 24,
+  keywordHitBoost: 16,
+  criticalHitFloor: 84,
 };
 type TextClassifier = (text: string, options?: { top_k?: number }) => Promise<unknown>;
 const classifierCache = new Map<string, Promise<TextClassifier>>();
@@ -338,6 +471,46 @@ function normalizeThresholdPercent(value: unknown, fallback: number): number {
   return Math.min(99, Math.max(1, Math.round(normalized * 100)));
 }
 
+function normalizePercent(
+  value: unknown,
+  fallback: number,
+  min = 0,
+  max = 100
+): number {
+  const fallbackSafe = Math.min(max, Math.max(min, Math.round(fallback)));
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallbackSafe;
+  }
+  const normalized = value > 1 ? value / 100 : value;
+  return Math.min(max, Math.max(min, Math.round(normalized * 100)));
+}
+
+function normalizeBoundedInteger(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  const fallbackSafe = Math.min(max, Math.max(min, Math.round(fallback)));
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallbackSafe;
+  }
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function normalizeCategoryThresholds(
+  value: unknown,
+  fallback: EngineCategoryThresholds
+): EngineCategoryThresholds {
+  const raw =
+    typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+  return {
+    toxicity: normalizeThresholdPercent(raw.toxicity, fallback.toxicity),
+    threat: normalizeThresholdPercent(raw.threat, fallback.threat),
+    scam: normalizeThresholdPercent(raw.scam, fallback.scam),
+  };
+}
+
 function normalizeAuthMode(value: unknown, fallback: TelegramAuthMode): TelegramAuthMode {
   return value === 'user' || value === 'bot' ? value : fallback;
 }
@@ -399,6 +572,23 @@ function sanitizePersistedSettings(
       ? legacyTargetChats
       : fallbackUserTargetChats;
   const targetChats = authMode === 'bot' ? botTargetChats : userTargetChats;
+  const keywords = Array.isArray(raw.keywords) ? normalizeStringArray(raw.keywords) : fallback.keywords;
+  const scamTriggers = Array.isArray(raw.scamTriggers)
+    ? normalizeStringArray(raw.scamTriggers)
+    : fallback.scamTriggers;
+  const drugTriggers = Array.isArray(raw.drugTriggers)
+    ? normalizeStringArray(raw.drugTriggers)
+    : fallback.drugTriggers;
+  const threatTriggers = Array.isArray(raw.threatTriggers)
+    ? normalizeStringArray(raw.threatTriggers)
+    : fallback.threatTriggers;
+  const toxicityTriggers = Array.isArray(raw.toxicityTriggers)
+    ? normalizeStringArray(raw.toxicityTriggers)
+    : fallback.toxicityTriggers;
+  const categoryThresholds = normalizeCategoryThresholds(
+    raw.categoryThresholds,
+    fallback.categoryThresholds
+  );
 
   return {
     apiId: toStringValue(raw.apiId, fallback.apiId),
@@ -424,9 +614,23 @@ function sanitizePersistedSettings(
       document: toBooleanValue(mediaTypesRaw.document, fallback.mediaTypes.document),
       audio: toBooleanValue(mediaTypesRaw.audio, fallback.mediaTypes.audio),
     },
-    keywords: toStringArray(raw.keywords, fallback.keywords),
+    keywords,
+    scamTriggers,
+    drugTriggers,
+    threatTriggers,
+    toxicityTriggers,
     mlModel,
     threatThreshold: normalizeThresholdPercent(raw.threatThreshold, fallback.threatThreshold),
+    categoryThresholds,
+    enableHeuristics: toBooleanValue(raw.enableHeuristics, fallback.enableHeuristics),
+    enableCriticalPatterns: toBooleanValue(raw.enableCriticalPatterns, fallback.enableCriticalPatterns),
+    modelWeight: normalizePercent(raw.modelWeight, fallback.modelWeight, 0, 100),
+    heuristicWeight: normalizePercent(raw.heuristicWeight, fallback.heuristicWeight, 0, 100),
+    modelTopK: normalizeBoundedInteger(raw.modelTopK, fallback.modelTopK, 1, 30),
+    maxAnalysisChars: normalizeBoundedInteger(raw.maxAnalysisChars, fallback.maxAnalysisChars, 200, 4000),
+    urlScamBoost: normalizePercent(raw.urlScamBoost, fallback.urlScamBoost, 0, 100),
+    keywordHitBoost: normalizePercent(raw.keywordHitBoost, fallback.keywordHitBoost, 0, 100),
+    criticalHitFloor: normalizePercent(raw.criticalHitFloor, fallback.criticalHitFloor, 0, 100),
   };
 }
 
@@ -917,6 +1121,12 @@ const RL_ENGINE_CONTROL = withRateLimit('engine_control', {
   cooldownMs: 30 * 1000,
   error: 'Too many start/stop requests.',
 });
+const RL_ENGINE_TEST = withRateLimit('engine_test', {
+  windowMs: 60 * 1000,
+  max: 8,
+  cooldownMs: 30 * 1000,
+  error: 'Too many engine test requests.',
+});
 const RL_STATUS = withRateLimit('status', {
   windowMs: 60 * 1000,
   max: 180,
@@ -1251,14 +1461,126 @@ function matchesAnyHint(label: string, hints: string[]): boolean {
   return hints.some((hint) => normalizedLabel.includes(normalizeLabelKey(hint)));
 }
 
-function extractModelScores(modelId: string, labels: LabelScore[]): RiskScores {
+type ModelScoreResult = {
+  scores: RiskScores;
+  safeScore: number;
+};
+type RuntimeEngineConfig = {
+  enableHeuristics: boolean;
+  enableCriticalPatterns: boolean;
+  modelWeight: number;
+  heuristicWeight: number;
+  modelTopK: number;
+  maxAnalysisChars: number;
+  urlScamBoost: number;
+  keywordHitBoost: number;
+  criticalHitFloor: number;
+  thresholds: RiskScores;
+  keywords: string[];
+  scamTriggers: string[];
+  drugTriggers: string[];
+  threatTriggers: string[];
+  toxicityTriggers: string[];
+};
+const SCAM_URL_CONTEXT_PATTERN = /(перевод|оплат|кошел|wallet|card|cvv|крипт|btc|usdt|бирж|p2p|инвест|доход|заработ)/i;
+
+function toRatio(percent: number): number {
+  return clamp01(percent / 100);
+}
+
+function normalizeTriggerList(value: string[]): string[] {
+  const unique = new Set<string>();
+  const result: string[] = [];
+  for (const item of value) {
+    const normalized = item.trim().toLowerCase();
+    if (!normalized || unique.has(normalized)) continue;
+    unique.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function normalizeWeights(modelWeightPercent: number, heuristicWeightPercent: number, useHeuristics: boolean): {
+  modelWeight: number;
+  heuristicWeight: number;
+} {
+  const modelWeight = clamp01(modelWeightPercent / 100);
+  const heuristicWeight = useHeuristics ? clamp01(heuristicWeightPercent / 100) : 0;
+  const total = modelWeight + heuristicWeight;
+  if (total <= 0) {
+    return useHeuristics
+      ? { modelWeight: 0.55, heuristicWeight: 0.45 }
+      : { modelWeight: 1, heuristicWeight: 0 };
+  }
+  return {
+    modelWeight: modelWeight / total,
+    heuristicWeight: heuristicWeight / total,
+  };
+}
+
+function toRuntimeEngineConfig(source: PersistedAppSettings): RuntimeEngineConfig {
+  const weights = normalizeWeights(source.modelWeight, source.heuristicWeight, source.enableHeuristics);
+  return {
+    enableHeuristics: source.enableHeuristics,
+    enableCriticalPatterns: source.enableCriticalPatterns,
+    modelWeight: weights.modelWeight,
+    heuristicWeight: weights.heuristicWeight,
+    modelTopK: source.modelTopK,
+    maxAnalysisChars: source.maxAnalysisChars,
+    urlScamBoost: toRatio(source.urlScamBoost),
+    keywordHitBoost: toRatio(source.keywordHitBoost),
+    criticalHitFloor: toRatio(source.criticalHitFloor),
+    thresholds: {
+      toxicity: normalizeThreshold(source.categoryThresholds.toxicity),
+      threat: normalizeThreshold(source.categoryThresholds.threat),
+      scam: normalizeThreshold(source.categoryThresholds.scam),
+    },
+    keywords: normalizeTriggerList(source.keywords),
+    scamTriggers: normalizeTriggerList(source.scamTriggers),
+    drugTriggers: normalizeTriggerList(source.drugTriggers),
+    threatTriggers: normalizeTriggerList(source.threatTriggers),
+    toxicityTriggers: normalizeTriggerList(source.toxicityTriggers),
+  };
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function hasTrigger(text: string, trigger: string): boolean {
+  if (!trigger || trigger.length <= 2) return false;
+  if (trigger.includes(' ')) {
+    return text.includes(trigger);
+  }
+  const pattern = new RegExp(`(^|[^\\p{L}\\p{N}_])${escapeRegExp(trigger)}(?=$|[^\\p{L}\\p{N}_])`, 'iu');
+  return pattern.test(text);
+}
+
+function countTriggerHits(text: string, triggers: string[]): number {
+  let hits = 0;
+  for (const trigger of triggers) {
+    if (hasTrigger(text, trigger)) {
+      hits += 1;
+    }
+  }
+  return hits;
+}
+
+function scoreFromHits(base: number, hits: number, step: number, cap = 0.99): number {
+  if (hits <= 0) return 0;
+  return clamp01(Math.min(cap, base + (hits - 1) * step));
+}
+
+function extractModelScores(modelId: string, labels: LabelScore[]): ModelScoreResult {
   const scores = emptyRiskScores();
   const config = MODEL_CONFIGS[modelId] ?? MODEL_CONFIGS[DEFAULT_MODEL_ID];
+  let safeScore = 0;
 
   for (const { label: rawLabel, score } of labels) {
     const label = normalizeLabelKey(rawLabel);
 
     if (isSafeLabel(label)) {
+      safeScore = Math.max(safeScore, score);
       continue;
     }
 
@@ -1271,9 +1593,26 @@ function extractModelScores(modelId: string, labels: LabelScore[]): RiskScores {
     if (matchesAnyHint(label, config.labelHints.scam)) {
       scores.scam = Math.max(scores.scam, score);
     }
+
+    if (
+      label === 'label-1' ||
+      label.includes('toxic') ||
+      label.includes('insult') ||
+      label.includes('obscene') ||
+      label.includes('offensive') ||
+      label.includes('abuse')
+    ) {
+      scores.toxicity = Math.max(scores.toxicity, score);
+    }
+    if (label.includes('threat') || label.includes('danger') || label.includes('violence') || label.includes('kill')) {
+      scores.threat = Math.max(scores.threat, score);
+    }
+    if (label.includes('scam') || label.includes('fraud') || label.includes('phishing') || label.includes('spam')) {
+      scores.scam = Math.max(scores.scam, score);
+    }
   }
 
-  return scores;
+  return { scores, safeScore };
 }
 
 async function getClassifier(modelId: string): Promise<TextClassifier> {
@@ -1315,7 +1654,7 @@ function heuristicScores(text: string): RiskScores {
   return scores;
 }
 
-async function requestModelScores(modelId: string, text: string): Promise<RiskScores> {
+async function requestModelScores(modelId: string, text: string): Promise<ModelScoreResult> {
   const classifier = await getClassifier(modelId);
   const payload = await classifier(text.slice(0, 1000), { top_k: 10 });
   const labels = normalizeLabelScores(payload);
@@ -1323,37 +1662,243 @@ async function requestModelScores(modelId: string, text: string): Promise<RiskSc
 }
 
 async function analyzeThreat(text: string): Promise<{ type: ThreatType; score: number }> {
+  const result = await analyzeThreatDetailed(text);
+  return { type: result.type, score: result.score };
+}
+
+function enhancedHeuristicScores(text: string, config: RuntimeEngineConfig): RiskScores {
+  const scores = emptyRiskScores();
+  const normalized = text.toLowerCase();
+
+  if (config.enableHeuristics) {
+    (Object.keys(HEURISTIC_PATTERNS) as RiskCategory[]).forEach((category) => {
+      const hits = HEURISTIC_PATTERNS[category].reduce((sum, pattern) => sum + (pattern.test(text) ? 1 : 0), 0);
+      scores[category] = clamp01(Math.min(0.9, hits * 0.22));
+    });
+
+    const toxicityHits = countTriggerHits(normalized, config.toxicityTriggers);
+    const threatHits = countTriggerHits(normalized, config.threatTriggers);
+    const scamHits = countTriggerHits(normalized, config.scamTriggers);
+    const drugHits = countTriggerHits(normalized, config.drugTriggers);
+    const keywordHits = countTriggerHits(normalized, config.keywords);
+
+    if (toxicityHits > 0) {
+      scores.toxicity = Math.max(scores.toxicity, scoreFromHits(0.52, toxicityHits, 0.11, 0.96));
+    }
+    if (threatHits > 0) {
+      scores.threat = Math.max(scores.threat, scoreFromHits(0.58, threatHits, 0.11, 0.98));
+    }
+    if (scamHits > 0) {
+      scores.scam = Math.max(scores.scam, scoreFromHits(0.56, scamHits, 0.1, 0.98));
+    }
+    if (drugHits > 0) {
+      scores.threat = Math.max(scores.threat, scoreFromHits(0.74, drugHits, 0.08, 0.99));
+    }
+    if (keywordHits > 0) {
+      const boosted = clamp01(Math.max(scores.scam, 0.35) + keywordHits * config.keywordHitBoost);
+      scores.scam = Math.max(scores.scam, boosted);
+    }
+  }
+
+  if (config.enableCriticalPatterns) {
+    (Object.keys(CRITICAL_PATTERNS) as RiskCategory[]).forEach((category) => {
+      for (const rule of CRITICAL_PATTERNS[category]) {
+        if (rule.pattern.test(text)) {
+          scores[category] = Math.max(scores[category], rule.score, config.criticalHitFloor);
+        }
+      }
+    });
+  }
+
+  if (/https?:\/\//i.test(text) && SCAM_URL_CONTEXT_PATTERN.test(text)) {
+    scores.scam = Math.max(scores.scam, clamp01(0.6 + config.urlScamBoost));
+  }
+
+  return scores;
+}
+
+async function requestModelScoresWithConfig(
+  modelId: string,
+  text: string,
+  config: RuntimeEngineConfig
+): Promise<ModelScoreResult> {
+  const classifier = await getClassifier(modelId);
+  const payload = await classifier(text.slice(0, config.maxAnalysisChars), { top_k: config.modelTopK });
+  const labels = normalizeLabelScores(payload);
+  return extractModelScores(modelId, labels);
+}
+
+function emptyThresholdScores(): RiskScores {
+  return { toxicity: 0, threat: 0, scam: 0 };
+}
+
+function resolveCategoryThresholds(config: RuntimeEngineConfig, globalThreshold: number): RiskScores {
+  return {
+    toxicity: config.thresholds.toxicity > 0 ? config.thresholds.toxicity : globalThreshold,
+    threat: config.thresholds.threat > 0 ? config.thresholds.threat : globalThreshold,
+    scam: config.thresholds.scam > 0 ? config.thresholds.scam : globalThreshold,
+  };
+}
+
+function blendScores(model: RiskScores, heuristic: RiskScores, config: RuntimeEngineConfig): RiskScores {
+  return {
+    toxicity: clamp01(model.toxicity * config.modelWeight + heuristic.toxicity * config.heuristicWeight),
+    threat: clamp01(model.threat * config.modelWeight + heuristic.threat * config.heuristicWeight),
+    scam: clamp01(model.scam * config.modelWeight + heuristic.scam * config.heuristicWeight),
+  };
+}
+
+async function analyzeThreatDetailed(
+  text: string,
+  sourceSettings: PersistedAppSettings = persistedSettings
+): Promise<AnalyzeThreatResult> {
   if (!text || text.trim() === '') {
-    return { type: 'safe', score: 0.99 };
+    return {
+      type: 'safe',
+      score: 0.99,
+      scores: emptyRiskScores(),
+      heuristicScores: emptyRiskScores(),
+      modelScores: emptyRiskScores(),
+      thresholds: emptyThresholdScores(),
+    };
   }
 
   const normalizedText = text.trim();
-  const heuristic = heuristicScores(normalizedText);
+  const modelId = MODEL_CONFIGS[sourceSettings.mlModel] ? sourceSettings.mlModel : DEFAULT_MODEL_ID;
+  const config = toRuntimeEngineConfig(sourceSettings);
+  const globalThreshold = normalizeThreshold(sourceSettings.threatThreshold);
+  const thresholds = resolveCategoryThresholds(config, globalThreshold);
+  const heuristic = enhancedHeuristicScores(normalizedText, config);
   let model = emptyRiskScores();
+  let safeLabelScore = 0;
 
   try {
-    model = await requestModelScores(selectedModelId, normalizedText);
+    const modelResult = await requestModelScoresWithConfig(modelId, normalizedText, config);
+    model = modelResult.scores;
+    safeLabelScore = modelResult.safeScore;
   } catch (error) {
     console.warn(`Inference fallback to heuristics: ${(error as Error).message}`);
   }
 
-  const combined: RiskScores = {
-    toxicity: Math.max(heuristic.toxicity, model.toxicity),
-    threat: Math.max(heuristic.threat, model.threat),
-    scam: Math.max(heuristic.scam, model.scam),
+  // Strong safe signal lowers model confidence to reduce false positives.
+  const safeAttenuation = clamp01(1 - safeLabelScore * 0.65);
+  const modelAdjusted: RiskScores = {
+    toxicity: clamp01(model.toxicity * safeAttenuation),
+    threat: clamp01(model.threat * safeAttenuation),
+    scam: clamp01(model.scam * safeAttenuation),
   };
+  const combined = blendScores(modelAdjusted, heuristic, config);
 
   const ranked = (Object.entries(combined) as [RiskCategory, number][])
     .sort((a, b) => b[1] - a[1]);
-  const [topCategory, topScore] = ranked[0];
-
-  if (topScore >= threatThreshold) {
-    return { type: topCategory, score: clamp01(topScore) };
+  const triggered = ranked.find(([category, score]) => score >= thresholds[category]);
+  if (triggered) {
+    const [topCategory, topScore] = triggered;
+    return {
+      type: topCategory,
+      score: clamp01(topScore),
+      scores: combined,
+      heuristicScores: heuristic,
+      modelScores: modelAdjusted,
+      thresholds,
+    };
   }
 
+  const topScore = ranked[0]?.[1] ?? 0;
   const safeConfidence = clamp01(Math.max(0.05, 1 - topScore));
-  return { type: 'safe', score: safeConfidence };
+  return {
+    type: 'safe',
+    score: safeConfidence,
+    scores: combined,
+    heuristicScores: heuristic,
+    modelScores: modelAdjusted,
+    thresholds,
+  };
 }
+
+app.post('/api/engine/test', isAdmin, RL_ENGINE_TEST, async (req, res) => {
+  try {
+    const settingsRaw =
+      typeof req.body?.settings === 'object' && req.body.settings !== null
+        ? (req.body.settings as Record<string, unknown>)
+        : {};
+    const testSettings = sanitizePersistedSettings(
+      {
+        ...persistedSettings,
+        ...settingsRaw,
+      },
+      persistedSettings
+    );
+
+    const incomingMessages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    const customMessages = incomingMessages
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0)
+      .slice(0, 80);
+
+    const tests = customMessages.length > 0
+      ? customMessages.map((text) => ({ text, expected: null as ThreatType | null, scenario: 'custom' }))
+      : ENGINE_SELF_TEST_MESSAGES.map((entry) => ({ ...entry }));
+
+    const results: Array<{
+      text: string;
+      expected: ThreatType | null;
+      scenario: string;
+      type: ThreatType;
+      confidence: number;
+      scores: { toxicity: number; threat: number; scam: number };
+      heuristicScores: { toxicity: number; threat: number; scam: number };
+      modelScores: { toxicity: number; threat: number; scam: number };
+      thresholds: { toxicity: number; threat: number; scam: number };
+    }> = [];
+    const summary = { safe: 0, toxicity: 0, threat: 0, scam: 0 };
+
+    for (const test of tests) {
+      const analysis = await analyzeThreatDetailed(test.text, testSettings);
+      summary[analysis.type as keyof typeof summary] += 1;
+
+      results.push({
+        text: test.text,
+        expected: test.expected,
+        scenario: test.scenario,
+        type: analysis.type,
+        confidence: Math.round(analysis.score * 100),
+        scores: {
+          toxicity: Math.round(analysis.scores.toxicity * 100),
+          threat: Math.round(analysis.scores.threat * 100),
+          scam: Math.round(analysis.scores.scam * 100),
+        },
+        heuristicScores: {
+          toxicity: Math.round(analysis.heuristicScores.toxicity * 100),
+          threat: Math.round(analysis.heuristicScores.threat * 100),
+          scam: Math.round(analysis.heuristicScores.scam * 100),
+        },
+        modelScores: {
+          toxicity: Math.round(analysis.modelScores.toxicity * 100),
+          threat: Math.round(analysis.modelScores.threat * 100),
+          scam: Math.round(analysis.modelScores.scam * 100),
+        },
+        thresholds: {
+          toxicity: Math.round(analysis.thresholds.toxicity * 100),
+          threat: Math.round(analysis.thresholds.threat * 100),
+          scam: Math.round(analysis.thresholds.scam * 100),
+        },
+      });
+    }
+
+    res.json({
+      model: testSettings.mlModel,
+      threshold: Math.round(normalizeThreshold(testSettings.threatThreshold) * 100),
+      count: results.length,
+      usedDefaultDataset: customMessages.length === 0,
+      summary,
+      results,
+    });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
 
 app.post('/api/start', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
   if (isRunning) return res.json({ status: 'already running' });
