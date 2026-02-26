@@ -70,6 +70,8 @@ jobs:
               NEEDS_INSTALL=1
             elif [ ! -x node_modules/.bin/vite ] || [ ! -x node_modules/.bin/tsx ]; then
               NEEDS_INSTALL=1
+            elif ! node -e "require('rollup/dist/native.js')" >/dev/null 2>&1; then
+              NEEDS_INSTALL=1
             elif [ -z "$SAVED_LOCK_HASH" ]; then
               echo "$CURRENT_LOCK_HASH" > "$LOCK_HASH_FILE"
               echo "Initialized lock hash file from current node_modules."
@@ -81,7 +83,7 @@ jobs:
               export npm_config_jobs=1
               export npm_config_progress=false
               export npm_config_loglevel=warn
-              npm install --include=dev --no-audit --no-fund --omit=optional --prefer-offline
+              npm install --include=dev --no-audit --no-fund --prefer-offline
               echo "$CURRENT_LOCK_HASH" > "$LOCK_HASH_FILE"
             else
               echo "Dependencies unchanged and toolchain present, skipping npm install."
