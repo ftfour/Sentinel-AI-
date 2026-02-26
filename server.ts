@@ -173,6 +173,19 @@ const HEURISTIC_PATTERNS: Record<RiskCategory, RegExp[]> = {
     /гарантированн/i,
   ],
 };
+const CRITICAL_PATTERNS: Record<RiskCategory, Array<{ pattern: RegExp; score: number }>> = {
+  toxicity: [
+    { pattern: /\b(чмо|пидор|пидр|мразь|сука|шлюха)\b/i, score: 0.88 },
+  ],
+  threat: [
+    { pattern: /\b(убью|убить|взорву|зарежу|расстреляю|смерть)\b/i, score: 0.92 },
+    { pattern: /\b(наркот(ик|а|ики|ики?)|наркота|закладк|кладмен|меф|амф|кокс|героин|гашиш|марихуан|спайс|соль|mdma|экстази|weed)\b/i, score: 0.9 },
+  ],
+  scam: [
+    { pattern: /\b(скам|scam|мошенн|фишинг|обман|развод)\b/i, score: 0.92 },
+    { pattern: /\b(seed phrase|сид фраз|кошел[её]к|перев(е|ео)д(и|ите)?|cvv|p2p|арбитраж|гарантированн(ый|ая)? доход|быстрый доход)\b/i, score: 0.88 },
+  ],
+};
 
 let selectedModelId = DEFAULT_MODEL_ID;
 let threatThreshold = 0.75;
@@ -340,11 +353,19 @@ function heuristicScores(text: string): RiskScores {
 
   (Object.keys(HEURISTIC_PATTERNS) as RiskCategory[]).forEach((category) => {
     const hits = HEURISTIC_PATTERNS[category].reduce((sum, pattern) => sum + (pattern.test(text) ? 1 : 0), 0);
-    scores[category] = clamp01(Math.min(0.92, hits * 0.22));
+    scores[category] = clamp01(Math.min(0.92, hits * 0.28));
   });
 
-  if (/https?:\/\//i.test(text) && /(перевод|оплат|кошел|card|wallet|крипт|btc|usdt)/i.test(text)) {
-    scores.scam = Math.max(scores.scam, 0.7);
+  (Object.keys(CRITICAL_PATTERNS) as RiskCategory[]).forEach((category) => {
+    for (const rule of CRITICAL_PATTERNS[category]) {
+      if (rule.pattern.test(text)) {
+        scores[category] = Math.max(scores[category], rule.score);
+      }
+    }
+  });
+
+  if (/https?:\/\//i.test(text) && /(перевод|оплат|кошел|card|wallet|крипт|btc|usdt|биржа|p2p)/i.test(text)) {
+    scores.scam = Math.max(scores.scam, 0.84);
   }
 
   return scores;
