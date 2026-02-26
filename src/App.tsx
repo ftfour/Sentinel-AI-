@@ -894,7 +894,26 @@ function SentinelApp() {
                           </span>
                         </div>
                       </div>
-                      <p className="text-sm text-slate-300 leading-relaxed">{msg.text}</p>
+                      {(() => {
+                        const text = typeof msg.text === 'string' ? msg.text : '';
+                        const normalizedText = text.trim().length > 0 ? text : '[No text content]';
+                        const showSpoiler = normalizedText.length > 220 || normalizedText.includes('\n');
+
+                        if (!showSpoiler) {
+                          return <p className="text-sm text-slate-300 leading-relaxed break-words">{normalizedText}</p>;
+                        }
+
+                        return (
+                          <details className="text-sm">
+                            <summary className="cursor-pointer select-none text-slate-400 hover:text-slate-200 transition-colors">
+                              Show full message ({normalizedText.length} chars)
+                            </summary>
+                            <pre className="mt-2 whitespace-pre-wrap break-words text-slate-300 font-sans leading-relaxed">
+                              {normalizedText}
+                            </pre>
+                          </details>
+                        );
+                      })()}
                     </div>
                   ))}
                 </div>

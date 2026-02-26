@@ -149,6 +149,7 @@ let client: TelegramClient | null = null;
 let isRunning = false;
 let recentMessages: any[] = [];
 let threatStats = { safe: 0, toxicity: 0, threat: 0, scam: 0 };
+const MAX_RECENT_MESSAGES = 300;
 type ThreatType = 'safe' | 'toxicity' | 'threat' | 'scam';
 type RiskCategory = Exclude<ThreatType, 'safe'>;
 type RiskScores = Record<RiskCategory, number>;
@@ -1487,12 +1488,12 @@ app.post('/api/start', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
         time: new Date(message.date * 1000).toLocaleTimeString(),
         chat: chatTitle,
         sender: senderName,
-        text: text.substring(0, 100),
+        text,
         type: analysis.type,
         score: analysis.score
       });
       
-      if (recentMessages.length > 50) recentMessages.pop();
+      if (recentMessages.length > MAX_RECENT_MESSAGES) recentMessages.pop();
     }, new NewMessage({ chats: eventChatFilter }));
     
     res.json({
