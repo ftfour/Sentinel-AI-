@@ -65,7 +65,14 @@ jobs:
               SAVED_LOCK_HASH="$(cat "$LOCK_HASH_FILE")"
             fi
 
-            if [ ! -d node_modules ] || [ "$CURRENT_LOCK_HASH" != "$SAVED_LOCK_HASH" ]; then
+            if [ ! -d node_modules ]; then
+              export npm_config_jobs=1
+              npm install --no-audit --no-fund --omit=optional --prefer-offline
+              echo "$CURRENT_LOCK_HASH" > "$LOCK_HASH_FILE"
+            elif [ -z "$SAVED_LOCK_HASH" ]; then
+              echo "$CURRENT_LOCK_HASH" > "$LOCK_HASH_FILE"
+              echo "Initialized lock hash file from current node_modules."
+            elif [ "$CURRENT_LOCK_HASH" != "$SAVED_LOCK_HASH" ]; then
               export npm_config_jobs=1
               npm install --no-audit --no-fund --omit=optional --prefer-offline
               echo "$CURRENT_LOCK_HASH" > "$LOCK_HASH_FILE"
