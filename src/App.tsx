@@ -77,13 +77,25 @@ const PrivateRoute = () => {
 
 
 // --- MOCK DATA ---
-const THREAT_TYPES = ['safe', 'toxicity', 'threat', 'scam'];
+const THREAT_TYPES = ['safe', 'toxicity', 'threat', 'scam', 'recruitment', 'drugs', 'terrorism'];
 const THREAT_COLORS = {
   safe: '#10b981', // emerald-500
   toxicity: '#f59e0b', // amber-500
   threat: '#ef4444', // red-500
-  scam: '#8b5cf6' // violet-500
+  scam: '#8b5cf6', // violet-500
+  recruitment: '#0ea5e9', // sky-500
+  drugs: '#eab308', // yellow-500
+  terrorism: '#dc2626', // red-600
 };
+const THREAT_LABELS = {
+  safe: 'Safe',
+  toxicity: 'Toxicity',
+  threat: 'Threat',
+  scam: 'Scam',
+  recruitment: 'Recruitment',
+  drugs: 'Drugs',
+  terrorism: 'Terrorism',
+} as const;
 
 type ModelOption = {
   id: string;
@@ -148,6 +160,26 @@ const DEFAULT_DRUG_TRIGGERS = [
   'mdma',
   'экстази',
 ];
+const DEFAULT_RECRUITMENT_TRIGGERS = [
+  'recruit',
+  'join the squad',
+  'cell recruitment',
+  'underground group',
+  'closed community',
+  'new fighters needed',
+  'join movement',
+  'tasks for members',
+];
+const DEFAULT_TERRORISM_TRIGGERS = [
+  'terror attack',
+  'explosion in public place',
+  'attack on target',
+  'explosive device',
+  'weapon for attack',
+  'organize explosion',
+  'mass attack',
+  'maximum damage',
+];
 const DEFAULT_THREAT_TRIGGERS = [
   'убью',
   'взорву',
@@ -173,6 +205,65 @@ const DEFAULT_TOXICITY_TRIGGERS = [
   'ненавижу',
 ];
 
+const ENGINE_RISK_KEYS: Array<keyof EngineRiskScores> = [
+  'toxicity',
+  'threat',
+  'scam',
+  'recruitment',
+  'drugs',
+  'terrorism',
+];
+type EngineSelfTestPreset = 'all' | 'recruitment' | 'drugs' | 'terrorism';
+type EngineSelfTestCategory = Exclude<EngineSelfTestPreset, 'all'>;
+
+const ENGINE_SELF_TEST_PRESET_OPTIONS: Array<{
+  id: EngineSelfTestPreset;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: 'all',
+    label: 'All Categories',
+    description: 'Runs built-in messages from all preset categories.',
+  },
+  {
+    id: 'recruitment',
+    label: 'Recruitment',
+    description: 'Messages about joining closed groups, cells, or coordinated teams.',
+  },
+  {
+    id: 'drugs',
+    label: 'Drugs',
+    description: 'Messages about selling narcotics, stash drops, and courier tasks.',
+  },
+  {
+    id: 'terrorism',
+    label: 'Terrorism',
+    description: 'Messages about attacks, explosives, and violent extremist actions.',
+  },
+];
+
+const SELF_TEST_PRESET_MESSAGES: Record<EngineSelfTestCategory, string[]> = {
+  recruitment: [
+    'Join our closed cell, we need new members for operations.',
+    'Recruitment to underground group is open, DM for tasks.',
+    'Need motivated fighters, training and missions start immediately.',
+    'We are forming a radical team, only trusted people needed.',
+  ],
+  drugs: [
+    'Selling meph and amphetamine, fast delivery and hidden drop points.',
+    'Need a stash courier for daily drug drops, good payout.',
+    'Cocaine and mdma available, write for coordinates and price.',
+    'New stash location posted, payment first then coordinates.',
+  ],
+  terrorism: [
+    'Preparing an attack with explosives in a public location.',
+    'Need weapons and people for a terror operation this week.',
+    'Plan is to maximize panic and damage during the strike.',
+    'Instructions for bomb assembly and target timing will follow.',
+  ],
+};
+
 type SettingsState = {
   apiId: string;
   apiHash: string;
@@ -197,11 +288,20 @@ type SettingsState = {
   newKeywordInput: string;
   scamTriggers: string[];
   drugTriggers: string[];
+  recruitmentTriggers: string[];
+  terrorismTriggers: string[];
   threatTriggers: string[];
   toxicityTriggers: string[];
   mlModel: string;
   threatThreshold: number;
-  categoryThresholds: { toxicity: number; threat: number; scam: number };
+  categoryThresholds: {
+    toxicity: number;
+    threat: number;
+    scam: number;
+    recruitment: number;
+    drugs: number;
+    terrorism: number;
+  };
   enableHeuristics: boolean;
   enableCriticalPatterns: boolean;
   modelWeight: number;
@@ -220,16 +320,25 @@ type AvailableTelegramChat = {
   type: 'group' | 'supergroup' | 'channel';
   avatar: string | null;
 };
+type ThreatLabel = 'safe' | 'toxicity' | 'threat' | 'scam' | 'recruitment' | 'drugs' | 'terrorism';
+type EngineRiskScores = {
+  toxicity: number;
+  threat: number;
+  scam: number;
+  recruitment: number;
+  drugs: number;
+  terrorism: number;
+};
 type EngineTestResult = {
   text: string;
   expected: string | null;
   scenario: string;
-  type: 'safe' | 'toxicity' | 'threat' | 'scam';
+  type: ThreatLabel;
   confidence: number;
-  scores: { toxicity: number; threat: number; scam: number };
-  heuristicScores: { toxicity: number; threat: number; scam: number };
-  modelScores: { toxicity: number; threat: number; scam: number };
-  thresholds: { toxicity: number; threat: number; scam: number };
+  scores: EngineRiskScores;
+  heuristicScores: EngineRiskScores;
+  modelScores: EngineRiskScores;
+  thresholds: EngineRiskScores;
 };
 type CooldownKey = 'saveSettings' | 'syncChats' | 'sessionCode' | 'sessionConfirm' | 'engineControl' | 'engineTest';
 type ActiveTab = 'dashboard' | 'agents' | 'engine' | 'proxy' | 'logs';
@@ -258,11 +367,13 @@ const DEFAULT_SETTINGS: SettingsState = {
   newKeywordInput: '',
   scamTriggers: [...DEFAULT_SCAM_TRIGGERS],
   drugTriggers: [...DEFAULT_DRUG_TRIGGERS],
+  recruitmentTriggers: [...DEFAULT_RECRUITMENT_TRIGGERS],
+  terrorismTriggers: [...DEFAULT_TERRORISM_TRIGGERS],
   threatTriggers: [...DEFAULT_THREAT_TRIGGERS],
   toxicityTriggers: [...DEFAULT_TOXICITY_TRIGGERS],
   mlModel: MODEL_OPTIONS[0].id,
   threatThreshold: 75,
-  categoryThresholds: { toxicity: 72, threat: 72, scam: 70 },
+  categoryThresholds: { toxicity: 72, threat: 72, scam: 70, recruitment: 74, drugs: 74, terrorism: 76 },
   enableHeuristics: true,
   enableCriticalPatterns: true,
   modelWeight: 58,
@@ -369,6 +480,17 @@ function numberOrFallback(value: unknown, fallback: number): number {
   return fallback;
 }
 
+function normalizeEngineScores(source: any): EngineRiskScores {
+  return {
+    toxicity: clampPercent(numberOrFallback(source?.toxicity, 0), 0, 100),
+    threat: clampPercent(numberOrFallback(source?.threat, 0), 0, 100),
+    scam: clampPercent(numberOrFallback(source?.scam, 0), 0, 100),
+    recruitment: clampPercent(numberOrFallback(source?.recruitment, 0), 0, 100),
+    drugs: clampPercent(numberOrFallback(source?.drugs, 0), 0, 100),
+    terrorism: clampPercent(numberOrFallback(source?.terrorism, 0), 0, 100),
+  };
+}
+
 // --- MAIN APP COMPONENT ---
 function SentinelApp() {
   const { user, logout } = useAuth();
@@ -377,7 +499,15 @@ function SentinelApp() {
   
   // Dashboard State
   const [messages, setMessages] = useState<any[]>([]);
-  const [stats, setStats] = useState<{ safe: number; toxicity: number; threat: number; scam: number }>({ safe: 0, toxicity: 0, threat: 0, scam: 0 });
+  const [stats, setStats] = useState<Record<ThreatLabel, number>>({
+    safe: 0,
+    toxicity: 0,
+    threat: 0,
+    scam: 0,
+    recruitment: 0,
+    drugs: 0,
+    terrorism: 0,
+  });
   
   // Settings State
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
@@ -404,10 +534,19 @@ function SentinelApp() {
   });
   const [engineTestInput, setEngineTestInput] = useState('');
   const [engineTestResults, setEngineTestResults] = useState<EngineTestResult[]>([]);
-  const [engineTestSummary, setEngineTestSummary] = useState<{ safe: number; toxicity: number; threat: number; scam: number } | null>(null);
+  const [engineTestSummary, setEngineTestSummary] = useState<Record<ThreatLabel, number> | null>(null);
   const [isRunningEngineTest, setIsRunningEngineTest] = useState(false);
   const [engineTestUsedDefaultSet, setEngineTestUsedDefaultSet] = useState(false);
+  const [engineTestPreset, setEngineTestPreset] = useState<EngineSelfTestPreset>('all');
+  const [engineTestUsedPreset, setEngineTestUsedPreset] = useState<EngineSelfTestPreset | 'custom'>('all');
   const selectedModel = MODEL_OPTIONS.find((model) => model.id === settings.mlModel) ?? MODEL_OPTIONS[0];
+  const selectedEnginePreset =
+    ENGINE_SELF_TEST_PRESET_OPTIONS.find((preset) => preset.id === engineTestPreset) ??
+    ENGINE_SELF_TEST_PRESET_OPTIONS[0];
+  const lastUsedEnginePresetLabel =
+    engineTestUsedPreset === 'custom'
+      ? 'Custom messages'
+      : (ENGINE_SELF_TEST_PRESET_OPTIONS.find((preset) => preset.id === engineTestUsedPreset)?.label ?? 'Unknown');
   const availableChats = availableChatsByMode[settings.authMode];
 
   // --- DATA FETCHING ---
@@ -431,7 +570,16 @@ function SentinelApp() {
           
           const statsRes = await fetch('/api/stats');
           const statsData = await statsRes.json();
-          setStats(statsData);
+          setStats((prev) => ({
+            ...prev,
+            safe: numberOrFallback(statsData?.safe, prev.safe),
+            toxicity: numberOrFallback(statsData?.toxicity, prev.toxicity),
+            threat: numberOrFallback(statsData?.threat, prev.threat),
+            scam: numberOrFallback(statsData?.scam, prev.scam),
+            recruitment: numberOrFallback(statsData?.recruitment, prev.recruitment),
+            drugs: numberOrFallback(statsData?.drugs, prev.drugs),
+            terrorism: numberOrFallback(statsData?.terrorism, prev.terrorism),
+          }));
         }
       } catch (err) {
         console.error('Не удалось получить статус', err);
@@ -483,6 +631,8 @@ function SentinelApp() {
     keywords: source.keywords,
     scamTriggers: source.scamTriggers,
     drugTriggers: source.drugTriggers,
+    recruitmentTriggers: source.recruitmentTriggers,
+    terrorismTriggers: source.terrorismTriggers,
     threatTriggers: source.threatTriggers,
     toxicityTriggers: source.toxicityTriggers,
     mlModel: source.mlModel,
@@ -503,6 +653,8 @@ function SentinelApp() {
     keywords: source.keywords,
     scamTriggers: source.scamTriggers,
     drugTriggers: source.drugTriggers,
+    recruitmentTriggers: source.recruitmentTriggers,
+    terrorismTriggers: source.terrorismTriggers,
     threatTriggers: source.threatTriggers,
     toxicityTriggers: source.toxicityTriggers,
     mlModel: source.mlModel,
@@ -575,12 +727,17 @@ function SentinelApp() {
       keywords: normalizeTriggerArray(saved?.keywords, prev.keywords),
       scamTriggers: normalizeTriggerArray(saved?.scamTriggers, prev.scamTriggers),
       drugTriggers: normalizeTriggerArray(saved?.drugTriggers, prev.drugTriggers),
+      recruitmentTriggers: normalizeTriggerArray(saved?.recruitmentTriggers, prev.recruitmentTriggers),
+      terrorismTriggers: normalizeTriggerArray(saved?.terrorismTriggers, prev.terrorismTriggers),
       threatTriggers: normalizeTriggerArray(saved?.threatTriggers, prev.threatTriggers),
       toxicityTriggers: normalizeTriggerArray(saved?.toxicityTriggers, prev.toxicityTriggers),
       categoryThresholds: {
         toxicity: clampPercent(numberOrFallback(saved?.categoryThresholds?.toxicity, prev.categoryThresholds.toxicity), 1, 99),
         threat: clampPercent(numberOrFallback(saved?.categoryThresholds?.threat, prev.categoryThresholds.threat), 1, 99),
         scam: clampPercent(numberOrFallback(saved?.categoryThresholds?.scam, prev.categoryThresholds.scam), 1, 99),
+        recruitment: clampPercent(numberOrFallback(saved?.categoryThresholds?.recruitment, prev.categoryThresholds.recruitment), 1, 99),
+        drugs: clampPercent(numberOrFallback(saved?.categoryThresholds?.drugs, prev.categoryThresholds.drugs), 1, 99),
+        terrorism: clampPercent(numberOrFallback(saved?.categoryThresholds?.terrorism, prev.categoryThresholds.terrorism), 1, 99),
       },
       enableHeuristics: typeof saved?.enableHeuristics === 'boolean' ? saved.enableHeuristics : prev.enableHeuristics,
       enableCriticalPatterns: typeof saved?.enableCriticalPatterns === 'boolean' ? saved.enableCriticalPatterns : prev.enableCriticalPatterns,
@@ -955,6 +1112,7 @@ function SentinelApp() {
         body: JSON.stringify({
           settings: toEngineSettingsPayload(settings),
           messages: customMessages,
+          preset: engineTestPreset,
         }),
       });
       const data = await res.json();
@@ -974,30 +1132,20 @@ function SentinelApp() {
               expected: typeof item.expected === 'string' ? item.expected : null,
               scenario: typeof item.scenario === 'string' ? item.scenario : 'custom',
               type:
-                item.type === 'safe' || item.type === 'toxicity' || item.type === 'threat' || item.type === 'scam'
+                item.type === 'safe' ||
+                item.type === 'toxicity' ||
+                item.type === 'threat' ||
+                item.type === 'scam' ||
+                item.type === 'recruitment' ||
+                item.type === 'drugs' ||
+                item.type === 'terrorism'
                   ? item.type
                   : 'safe',
               confidence: clampPercent(numberOrFallback(item.confidence, 0), 0, 100),
-              scores: {
-                toxicity: clampPercent(numberOrFallback(item?.scores?.toxicity, 0), 0, 100),
-                threat: clampPercent(numberOrFallback(item?.scores?.threat, 0), 0, 100),
-                scam: clampPercent(numberOrFallback(item?.scores?.scam, 0), 0, 100),
-              },
-              heuristicScores: {
-                toxicity: clampPercent(numberOrFallback(item?.heuristicScores?.toxicity, 0), 0, 100),
-                threat: clampPercent(numberOrFallback(item?.heuristicScores?.threat, 0), 0, 100),
-                scam: clampPercent(numberOrFallback(item?.heuristicScores?.scam, 0), 0, 100),
-              },
-              modelScores: {
-                toxicity: clampPercent(numberOrFallback(item?.modelScores?.toxicity, 0), 0, 100),
-                threat: clampPercent(numberOrFallback(item?.modelScores?.threat, 0), 0, 100),
-                scam: clampPercent(numberOrFallback(item?.modelScores?.scam, 0), 0, 100),
-              },
-              thresholds: {
-                toxicity: clampPercent(numberOrFallback(item?.thresholds?.toxicity, 0), 0, 100),
-                threat: clampPercent(numberOrFallback(item?.thresholds?.threat, 0), 0, 100),
-                scam: clampPercent(numberOrFallback(item?.thresholds?.scam, 0), 0, 100),
-              },
+              scores: normalizeEngineScores(item?.scores),
+              heuristicScores: normalizeEngineScores(item?.heuristicScores),
+              modelScores: normalizeEngineScores(item?.modelScores),
+              thresholds: normalizeEngineScores(item?.thresholds),
             }))
         : [];
 
@@ -1009,10 +1157,25 @@ function SentinelApp() {
               toxicity: clampPercent(numberOrFallback((data.summary as any).toxicity, 0), 0, 10000),
               threat: clampPercent(numberOrFallback((data.summary as any).threat, 0), 0, 10000),
               scam: clampPercent(numberOrFallback((data.summary as any).scam, 0), 0, 10000),
+              recruitment: clampPercent(numberOrFallback((data.summary as any).recruitment, 0), 0, 10000),
+              drugs: clampPercent(numberOrFallback((data.summary as any).drugs, 0), 0, 10000),
+              terrorism: clampPercent(numberOrFallback((data.summary as any).terrorism, 0), 0, 10000),
             }
           : null
       );
       setEngineTestUsedDefaultSet(Boolean(data?.usedDefaultDataset));
+      const usedPresetRaw = typeof data?.usedPreset === 'string' ? data.usedPreset : '';
+      const normalizedUsedPreset: EngineSelfTestPreset | 'custom' =
+        usedPresetRaw === 'custom' ||
+        usedPresetRaw === 'all' ||
+        usedPresetRaw === 'recruitment' ||
+        usedPresetRaw === 'drugs' ||
+        usedPresetRaw === 'terrorism'
+          ? usedPresetRaw
+          : customMessages.length > 0
+            ? 'custom'
+            : engineTestPreset;
+      setEngineTestUsedPreset(normalizedUsedPreset);
     } catch (error) {
       console.error('Failed to run engine self-test', error);
       alert(`Engine self-test failed: ${(error as Error).message}`);
@@ -1107,8 +1270,21 @@ function SentinelApp() {
   // --- RENDERERS ---
   const renderDashboard = () => {
         const pieData = Object.entries(stats).map(([name, value]) => ({ name, value }));
-    const totalMessages: number = stats.safe + stats.toxicity + stats.threat + stats.scam;
-    const sumThreats: number = stats.toxicity + stats.threat + stats.scam;
+    const totalMessages: number =
+      stats.safe +
+      stats.toxicity +
+      stats.threat +
+      stats.scam +
+      stats.recruitment +
+      stats.drugs +
+      stats.terrorism;
+    const sumThreats: number =
+      stats.toxicity +
+      stats.threat +
+      stats.scam +
+      stats.recruitment +
+      stats.drugs +
+      stats.terrorism;
     const threatRatio: string = totalMessages === 0 ? "0.0" : ((sumThreats / totalMessages) * 100).toFixed(1);
 
     return (
@@ -1184,6 +1360,9 @@ function SentinelApp() {
                             msg.type === 'safe' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
                             msg.type === 'toxicity' ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
                             msg.type === 'threat' ? "bg-red-500/10 text-red-400 border border-red-500/20" :
+                            msg.type === 'recruitment' ? "bg-sky-500/10 text-sky-400 border border-sky-500/20" :
+                            msg.type === 'drugs' ? "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20" :
+                            msg.type === 'terrorism' ? "bg-rose-500/10 text-rose-400 border border-rose-500/20" :
                             "bg-violet-500/10 text-violet-400 border border-violet-500/20"
                           )}>
                             {msg.type}
@@ -1652,6 +1831,24 @@ function SentinelApp() {
                   />
                 </div>
                 <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Recruitment triggers</label>
+                  <textarea
+                    rows={7}
+                    value={triggerArrayToText(settings.recruitmentTriggers)}
+                    onChange={(e) => setSettings((prev) => ({ ...prev, recruitmentTriggers: triggerTextToArray(e.target.value) }))}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500 font-mono"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Terrorism triggers</label>
+                  <textarea
+                    rows={7}
+                    value={triggerArrayToText(settings.terrorismTriggers)}
+                    onChange={(e) => setSettings((prev) => ({ ...prev, terrorismTriggers: triggerTextToArray(e.target.value) }))}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500 font-mono"
+                  />
+                </div>
+                <div className="space-y-2">
                   <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Threat triggers</label>
                   <textarea
                     rows={7}
@@ -1918,58 +2115,37 @@ function SentinelApp() {
             </div>
             <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Toxicity %</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={99}
-                      value={settings.categoryThresholds.toxicity}
-                      onChange={(e) => setSettings((prev) => ({
-                        ...prev,
-                        categoryThresholds: {
-                          ...prev.categoryThresholds,
-                          toxicity: clampPercent(numberOrFallback(e.target.value, prev.categoryThresholds.toxicity), 1, 99),
-                        },
-                      }))}
-                      className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Threat %</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={99}
-                      value={settings.categoryThresholds.threat}
-                      onChange={(e) => setSettings((prev) => ({
-                        ...prev,
-                        categoryThresholds: {
-                          ...prev.categoryThresholds,
-                          threat: clampPercent(numberOrFallback(e.target.value, prev.categoryThresholds.threat), 1, 99),
-                        },
-                      }))}
-                      className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Scam %</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={99}
-                      value={settings.categoryThresholds.scam}
-                      onChange={(e) => setSettings((prev) => ({
-                        ...prev,
-                        categoryThresholds: {
-                          ...prev.categoryThresholds,
-                          scam: clampPercent(numberOrFallback(e.target.value, prev.categoryThresholds.scam), 1, 99),
-                        },
-                      }))}
-                      className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500"
-                    />
-                  </div>
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                  {(
+                    [
+                      ['toxicity', 'Toxicity %'],
+                      ['threat', 'Threat %'],
+                      ['scam', 'Scam %'],
+                      ['recruitment', 'Recruitment %'],
+                      ['drugs', 'Drugs %'],
+                      ['terrorism', 'Terrorism %'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <div key={key} className="space-y-2">
+                      <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">{label}</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={99}
+                        value={settings.categoryThresholds[key]}
+                        onChange={(e) =>
+                          setSettings((prev) => ({
+                            ...prev,
+                            categoryThresholds: {
+                              ...prev.categoryThresholds,
+                              [key]: clampPercent(numberOrFallback(e.target.value, prev.categoryThresholds[key]), 1, 99),
+                            },
+                          }))
+                        }
+                        className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500"
+                      />
+                    </div>
+                  ))}
                 </div>
 
                 <div className="space-y-2">
@@ -2079,6 +2255,77 @@ function SentinelApp() {
               </button>
             </div>
             <div className="p-6 space-y-4">
+              <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-4 space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Built-in dataset preset</label>
+                  <p className="text-[11px] text-slate-500">{selectedEnginePreset.description}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {ENGINE_SELF_TEST_PRESET_OPTIONS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => setEngineTestPreset(preset.id)}
+                      className={cn(
+                        "px-2.5 py-1.5 rounded-md border text-xs transition-colors",
+                        engineTestPreset === preset.id
+                          ? "border-violet-500/40 bg-violet-500/10 text-violet-200"
+                          : "border-slate-700 text-slate-300 hover:border-slate-600 hover:text-slate-200"
+                      )}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (engineTestPreset === 'all') {
+                        setEngineTestInput((Object.values(SELF_TEST_PRESET_MESSAGES) as string[][]).flat().join('\n'));
+                        return;
+                      }
+                      setEngineTestInput(SELF_TEST_PRESET_MESSAGES[engineTestPreset].join('\n'));
+                    }}
+                    className="px-2.5 py-1.5 rounded-md border border-slate-700 text-xs text-slate-300 hover:border-slate-600 hover:text-slate-200 transition-colors"
+                  >
+                    Load preset into custom input
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEngineTestInput('')}
+                    className="px-2.5 py-1.5 rounded-md border border-slate-700 text-xs text-slate-300 hover:border-slate-600 hover:text-slate-200 transition-colors"
+                  >
+                    Clear custom input
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Preset messages by category</label>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  {(Object.entries(SELF_TEST_PRESET_MESSAGES) as Array<[EngineSelfTestCategory, string[]]>).map(
+                    ([category, presetMessages]) => (
+                      <div key={category} className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium text-slate-200">
+                            {ENGINE_SELF_TEST_PRESET_OPTIONS.find((preset) => preset.id === category)?.label ?? category}
+                          </span>
+                          <span className="text-[11px] text-slate-500">{presetMessages.length} msgs</span>
+                        </div>
+                        <div className="mt-2 space-y-1">
+                          {presetMessages.map((message, presetIndex) => (
+                            <div key={`${category}-${presetIndex}`} className="text-[11px] text-slate-400">
+                              {presetIndex + 1}. {message}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Custom test messages (optional)</label>
                 <textarea
@@ -2086,19 +2333,22 @@ function SentinelApp() {
                   value={engineTestInput}
                   onChange={(e) => setEngineTestInput(e.target.value)}
                   className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-violet-500 font-mono"
-                  placeholder={'One message per line. If empty, built-in dataset is used.'}
+                  placeholder={'One message per line. If this field is empty, selected preset dataset is used.'}
                 />
                 <p className="text-[11px] text-slate-500">
-                  {engineTestUsedDefaultSet ? 'Last run used built-in generated dataset.' : 'Last run used custom messages from this field.'}
+                  {engineTestUsedDefaultSet
+                    ? `Last run used preset dataset: ${lastUsedEnginePresetLabel}.`
+                    : 'Last run used custom messages from this field.'}
                 </p>
               </div>
 
               {engineTestSummary && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 text-xs text-slate-300">Safe: {engineTestSummary.safe}</div>
-                  <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 text-xs text-amber-300">Toxicity: {engineTestSummary.toxicity}</div>
-                  <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 text-xs text-red-300">Threat: {engineTestSummary.threat}</div>
-                  <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 text-xs text-violet-300">Scam: {engineTestSummary.scam}</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                  {(THREAT_TYPES as ThreatLabel[]).map((type) => (
+                    <div key={`summary-${type}`} className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 text-xs text-slate-300">
+                      {THREAT_LABELS[type]}: {engineTestSummary[type]}
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -2114,10 +2364,12 @@ function SentinelApp() {
                         <div className="text-[11px] text-slate-500 mt-1">Expected: {result.expected}</div>
                       )}
                       <pre className="mt-2 text-xs text-slate-300 whitespace-pre-wrap break-words font-sans">{result.text}</pre>
-                      <div className="mt-2 grid grid-cols-3 gap-2 text-[11px] text-slate-400">
-                        <div>Tox {result.scores.toxicity}% / thr {result.thresholds.toxicity}%</div>
-                        <div>Threat {result.scores.threat}% / thr {result.thresholds.threat}%</div>
-                        <div>Scam {result.scores.scam}% / thr {result.thresholds.scam}%</div>
+                      <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px] text-slate-400">
+                        {ENGINE_RISK_KEYS.map((riskKey) => (
+                          <div key={`${result.text}-${riskKey}`}>
+                            {THREAT_LABELS[riskKey]} {result.scores[riskKey]}% / thr {result.thresholds[riskKey]}%
+                          </div>
+                        ))}
                       </div>
                     </div>
                   ))}
