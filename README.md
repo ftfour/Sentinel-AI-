@@ -42,6 +42,7 @@ Create `.env` using `.env.example`.
 - `SESSION_SECRET` - session cookie secret
 - `ADMIN_PASSWORD` - password for `admin`
 - `VIEWER_PASSWORD` - password for `viewer`
+- `HF_API_TOKEN` - optional Hugging Face Inference API token
 - `APP_URL` - optional app URL metadata
 
 ## Local Run
@@ -80,6 +81,15 @@ NODE_ENV=production npm run start
 - `GET /api/status`
 - `GET /api/messages`
 - `GET /api/stats`
+
+## Threat Models In Admin Panel
+
+Admin panel now includes model selection with per-model descriptions:
+- `cointegrated/rubert-tiny-toxicity`
+- `s-nlp/russian_toxicity_classifier`
+- `apanc/russian-sensitive-topics`
+
+Message confidence percentages are calculated from model output (or heuristic fallback).
 
 ## Deploy From GitHub To Server
 

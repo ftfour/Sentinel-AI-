@@ -85,6 +85,34 @@ const THREAT_COLORS = {
   scam: '#8b5cf6' // violet-500
 };
 
+type ModelOption = {
+  id: string;
+  name: string;
+  summary: string;
+  bestFor: string;
+};
+
+const MODEL_OPTIONS: ModelOption[] = [
+  {
+    id: 'cointegrated/rubert-tiny-toxicity',
+    name: 'RuBERT Tiny Toxicity',
+    summary: 'Fast Russian toxicity classifier. Works well for insults and aggressive language.',
+    bestFor: 'Fast response and low server load',
+  },
+  {
+    id: 's-nlp/russian_toxicity_classifier',
+    name: 'Russian Toxicity Classifier',
+    summary: 'Binary toxicity detector with stable confidence for short and medium texts.',
+    bestFor: 'Reliable toxic vs safe decision',
+  },
+  {
+    id: 'apanc/russian-sensitive-topics',
+    name: 'Russian Sensitive Topics',
+    summary: 'Topic risk model for crime, drugs, violence and other sensitive domains.',
+    bestFor: 'Contextual risk and suspicious topic detection',
+  },
+];
+
 // --- MAIN APP COMPONENT ---
 function SentinelApp() {
   const { user, logout } = useAuth();
@@ -113,9 +141,10 @@ function SentinelApp() {
     mediaTypes: { photo: true, video: false, document: false, audio: false },
     keywords: ['crypto', 'hack', 'buy', 'sell', 'leak'],
     newKeywordInput: '',
-    mlModel: 'cointegrated/rubert-tiny',
+    mlModel: MODEL_OPTIONS[0].id,
     threatThreshold: 75,
   });
+  const selectedModel = MODEL_OPTIONS.find((model) => model.id === settings.mlModel) ?? MODEL_OPTIONS[0];
 
   // --- DATA FETCHING ---
   useEffect(() => {
@@ -165,7 +194,9 @@ function SentinelApp() {
             apiId: settings.apiId,
             apiHash: settings.apiHash,
             botToken: settings.botToken,
-            chats: settings.targetChats
+            chats: settings.targetChats,
+            model: settings.mlModel,
+            threatThreshold: settings.threatThreshold / 100
           })
         });
         const data = await res.json();
@@ -239,8 +270,8 @@ function SentinelApp() {
               <span className="text-slate-400 text-sm font-medium">ML-модель</span>
               <Cpu className="w-4 h-4 text-violet-400" />
             </div>
-            <div className="text-sm font-mono text-slate-300 mt-2 truncate" title={settings.mlModel}>
-              {settings.mlModel.split('/').pop()}
+            <div className="text-sm font-mono text-slate-300 mt-2 truncate" title={selectedModel.name}>
+              {selectedModel.name}
             </div>
           </div>
         </div>
@@ -571,10 +602,16 @@ function SentinelApp() {
                   onChange={e => setSettings({...settings, mlModel: e.target.value})}
                   className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-violet-500 font-mono"
                 >
-                  <option value="cointegrated/rubert-tiny">cointegrated/rubert-tiny (Быстрая)</option>
-                  <option value="DeepPavlov/rubert-base-cased">DeepPavlov/rubert-base-cased (Точная)</option>
-                  <option value="sberbank-ai/ruRoberta-large">sberbank-ai/ruRoberta-large (Тяжелая)</option>
+                  {MODEL_OPTIONS.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                    </option>
+                  ))}
                 </select>
+                <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3">
+                  <p className="text-xs text-slate-300">{selectedModel.summary}</p>
+                  <p className="text-[11px] text-slate-500 mt-2">Best for: {selectedModel.bestFor}</p>
+                </div>
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
