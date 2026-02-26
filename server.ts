@@ -214,13 +214,21 @@ type LocalOnnxOptions = {
   subfolder?: string;
   dtype?: 'fp32' | 'fp16' | 'q8';
 };
+type ModelTask = 'text-classification' | 'zero-shot-classification';
+type ZeroShotConfig = {
+  candidateLabels: Record<RiskCategory, string>;
+  hypothesisTemplate?: string;
+  multiLabel?: boolean;
+};
 
 type ThreatModelConfig = {
   id: string;
   name: string;
   description: string;
   repo: string;
+  task: ModelTask;
   inferenceOptions?: LocalOnnxOptions;
+  zeroShot?: ZeroShotConfig;
   labelHints: {
     toxicity: string[];
     threat: string[];
@@ -237,6 +245,7 @@ const MODEL_CONFIGS: Record<string, ThreatModelConfig> = {
     name: 'RuBERT Tiny ONNX (Balanced)',
     description: 'Default local Russian toxicity model. Good quality and stable confidence.',
     repo: 'aafoninsky/rubert-tiny-toxicity-onnx',
+    task: 'text-classification',
     inferenceOptions: {
       dtype: 'fp32',
     },
@@ -254,6 +263,7 @@ const MODEL_CONFIGS: Record<string, ThreatModelConfig> = {
     name: 'RuBERT Tiny ONNX (Quantized)',
     description: 'Lower RAM profile using quantized ONNX weights. Best for small VPS.',
     repo: 'aafoninsky/rubert-tiny-toxicity-onnx',
+    task: 'text-classification',
     inferenceOptions: {
       model_file_name: 'model_quantized',
       subfolder: 'onnx',
@@ -273,6 +283,7 @@ const MODEL_CONFIGS: Record<string, ThreatModelConfig> = {
     name: 'RuBERT Tiny ONNX (FP16 Optimized)',
     description: 'Alternative ONNX export optimized for throughput on CPU.',
     repo: 'morzecrew/rubert-tiny-toxicity-onnx-optimized-fp16',
+    task: 'text-classification',
     inferenceOptions: {
       model_file_name: 'optimized_fp16',
       subfolder: '',
@@ -285,6 +296,126 @@ const MODEL_CONFIGS: Record<string, ThreatModelConfig> = {
       recruitment: ['recruitment', 'radicalization', 'extremism'],
       drugs: ['drugs', 'narcotics', 'substance'],
       terrorism: ['terrorism', 'terror', 'extremist'],
+    },
+  },
+  'hf/bert-mini-toxicity-quant': {
+    id: 'hf/bert-mini-toxicity-quant',
+    name: 'BERT Mini Toxicity (Multilingual Quantized)',
+    description: 'Compact multilingual toxicity model with quantized ONNX weights.',
+    repo: 'gravitee-io/bert-mini-toxicity',
+    task: 'text-classification',
+    inferenceOptions: {
+      model_file_name: 'model.quant',
+      subfolder: '',
+      dtype: 'fp32',
+    },
+    labelHints: {
+      toxicity: ['toxic', 'toxicity', 'offensive', 'insult', 'abuse'],
+      threat: ['threat', 'dangerous', 'violence', 'kill'],
+      scam: ['fraud', 'scam', 'phishing', 'spam'],
+      recruitment: ['recruitment', 'radicalization', 'extremism'],
+      drugs: ['drugs', 'narcotics', 'substance'],
+      terrorism: ['terrorism', 'terror', 'extremist'],
+    },
+  },
+  'hf/bert-small-toxicity-quant': {
+    id: 'hf/bert-small-toxicity-quant',
+    name: 'BERT Small Toxicity (Multilingual Quantized)',
+    description: 'Balanced multilingual toxicity model with stronger quality than mini.',
+    repo: 'gravitee-io/bert-small-toxicity',
+    task: 'text-classification',
+    inferenceOptions: {
+      model_file_name: 'model.quant',
+      subfolder: '',
+      dtype: 'fp32',
+    },
+    labelHints: {
+      toxicity: ['toxic', 'toxicity', 'offensive', 'insult', 'abuse'],
+      threat: ['threat', 'dangerous', 'violence', 'kill'],
+      scam: ['fraud', 'scam', 'phishing', 'spam'],
+      recruitment: ['recruitment', 'radicalization', 'extremism'],
+      drugs: ['drugs', 'narcotics', 'substance'],
+      terrorism: ['terrorism', 'terror', 'extremist'],
+    },
+  },
+  'hf/distilbert-multilingual-toxicity-quant': {
+    id: 'hf/distilbert-multilingual-toxicity-quant',
+    name: 'DistilBERT Multilingual Toxicity (Quantized)',
+    description: 'Wider multilingual coverage model for toxicity in mixed-language chats.',
+    repo: 'gravitee-io/distilbert-multilingual-toxicity-classifier',
+    task: 'text-classification',
+    inferenceOptions: {
+      model_file_name: 'model.quant',
+      subfolder: '',
+      dtype: 'fp32',
+    },
+    labelHints: {
+      toxicity: ['toxic', 'toxicity', 'offensive', 'insult', 'abuse'],
+      threat: ['threat', 'dangerous', 'violence', 'kill'],
+      scam: ['fraud', 'scam', 'phishing', 'spam'],
+      recruitment: ['recruitment', 'radicalization', 'extremism'],
+      drugs: ['drugs', 'narcotics', 'substance'],
+      terrorism: ['terrorism', 'terror', 'extremist'],
+    },
+  },
+  'zero-shot/xenova-mdeberta-v3-xnli': {
+    id: 'zero-shot/xenova-mdeberta-v3-xnli',
+    name: 'mDeBERTa-v3 XNLI (Zero-Shot)',
+    description: 'Multilingual zero-shot NLI model for custom moderation categories.',
+    repo: 'Xenova/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7',
+    task: 'zero-shot-classification',
+    inferenceOptions: {
+      dtype: 'fp32',
+    },
+    zeroShot: {
+      candidateLabels: {
+        toxicity: 'toxic or insulting language',
+        threat: 'threats of violence or physical harm',
+        scam: 'fraud, scam, phishing, or financial deception',
+        recruitment: 'recruitment into illegal or extremist groups',
+        drugs: 'drug trafficking, narcotics sale, or stash coordination',
+        terrorism: 'terrorism, terror attack planning, or extremist violence',
+      },
+      hypothesisTemplate: 'This text is about {}.',
+      multiLabel: true,
+    },
+    labelHints: {
+      toxicity: ['toxic', 'insulting', 'offensive', 'abusive'],
+      threat: ['threat', 'violence', 'harm'],
+      scam: ['fraud', 'scam', 'phishing', 'deception'],
+      recruitment: ['recruitment', 'illegal group', 'extremist'],
+      drugs: ['drug', 'narcotics', 'trafficking', 'stash'],
+      terrorism: ['terrorism', 'terror attack', 'extremist violence'],
+    },
+  },
+  'zero-shot/mdeberta-v3-mnli-xnli': {
+    id: 'zero-shot/mdeberta-v3-mnli-xnli',
+    name: 'mDeBERTa-v3 MNLI/XNLI (Zero-Shot)',
+    description: 'General multilingual zero-shot classifier with strong NLI quality.',
+    repo: 'MoritzLaurer/mDeBERTa-v3-base-mnli-xnli',
+    task: 'zero-shot-classification',
+    inferenceOptions: {
+      dtype: 'fp32',
+    },
+    zeroShot: {
+      candidateLabels: {
+        toxicity: 'toxic or insulting language',
+        threat: 'threats of violence or physical harm',
+        scam: 'fraud, scam, phishing, or financial deception',
+        recruitment: 'recruitment into illegal or extremist groups',
+        drugs: 'drug trafficking, narcotics sale, or stash coordination',
+        terrorism: 'terrorism, terror attack planning, or extremist violence',
+      },
+      hypothesisTemplate: 'This text is about {}.',
+      multiLabel: true,
+    },
+    labelHints: {
+      toxicity: ['toxic', 'insulting', 'offensive', 'abusive'],
+      threat: ['threat', 'violence', 'harm'],
+      scam: ['fraud', 'scam', 'phishing', 'deception'],
+      recruitment: ['recruitment', 'illegal group', 'extremist'],
+      drugs: ['drug', 'narcotics', 'trafficking', 'stash'],
+      terrorism: ['terrorism', 'terror attack', 'extremist violence'],
     },
   },
 };
@@ -458,7 +589,7 @@ const DEFAULT_PERSISTED_SETTINGS: PersistedAppSettings = {
   keywordHitBoost: 16,
   criticalHitFloor: 84,
 };
-type TextClassifier = (text: string, options?: { top_k?: number }) => Promise<unknown>;
+type TextClassifier = (...args: unknown[]) => Promise<unknown>;
 const classifierCache = new Map<string, Promise<TextClassifier>>();
 const SAFE_LABEL_HINTS = ['non-toxic', 'not-toxic', 'safe', 'neutral', 'label-0'];
 const HEURISTIC_PATTERNS: Record<RiskCategory, RegExp[]> = {
@@ -1547,6 +1678,38 @@ function normalizeLabelScores(payload: unknown): LabelScore[] {
     .filter((entry) => entry.label.length > 0);
 }
 
+function normalizeZeroShotScores(payload: unknown): LabelScore[] {
+  if (!payload) return [];
+
+  const candidate =
+    Array.isArray(payload) && payload.length > 0
+      ? payload[0]
+      : payload;
+
+  if (typeof candidate !== 'object' || candidate === null) {
+    return [];
+  }
+
+  const entry = candidate as Record<string, unknown>;
+  const labels = Array.isArray(entry.labels) ? entry.labels : [];
+  const scores = Array.isArray(entry.scores) ? entry.scores : [];
+  const count = Math.min(labels.length, scores.length);
+  if (count <= 0) return [];
+
+  const result: LabelScore[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const label = labels[index];
+    const score = scores[index];
+    if (typeof label !== 'string') continue;
+    result.push({
+      label,
+      score: clamp01(Number(score ?? 0)),
+    });
+  }
+
+  return result;
+}
+
 function normalizeLabelKey(value: string): string {
   return value.toLowerCase().replace(/[_\s]+/g, '-').trim();
 }
@@ -1743,6 +1906,31 @@ function extractModelScores(modelId: string, labels: LabelScore[]): ModelScoreRe
   return { scores, safeScore };
 }
 
+function extractZeroShotScores(config: ThreatModelConfig, labels: LabelScore[]): ModelScoreResult {
+  const scores = emptyRiskScores();
+  const zeroShot = config.zeroShot;
+  if (!zeroShot) {
+    return { scores, safeScore: 0 };
+  }
+
+  const byLabel = new Map<string, number>();
+  for (const labelEntry of labels) {
+    byLabel.set(normalizeLabelKey(labelEntry.label), labelEntry.score);
+  }
+
+  for (const category of RISK_CATEGORIES) {
+    const candidateLabel = zeroShot.candidateLabels[category];
+    const score = byLabel.get(normalizeLabelKey(candidateLabel)) ?? 0;
+    scores[category] = clamp01(score);
+  }
+
+  const topScore = RISK_CATEGORIES.reduce((max, category) => Math.max(max, scores[category]), 0);
+  return {
+    scores,
+    safeScore: clamp01(1 - topScore),
+  };
+}
+
 async function getClassifier(modelId: string): Promise<TextClassifier> {
   const config = MODEL_CONFIGS[modelId] ?? MODEL_CONFIGS[DEFAULT_MODEL_ID];
   let classifierPromise = classifierCache.get(config.id);
@@ -1750,7 +1938,7 @@ async function getClassifier(modelId: string): Promise<TextClassifier> {
   if (!classifierPromise) {
     classifierPromise = (async () => {
       console.log(`Loading local ONNX model: ${config.name} (${config.repo})`);
-      const classifier = await pipeline('text-classification', config.repo, config.inferenceOptions ?? {});
+      const classifier = await pipeline(config.task, config.repo, config.inferenceOptions ?? {});
       return classifier as TextClassifier;
     })();
     classifierCache.set(config.id, classifierPromise);
@@ -1783,8 +1971,26 @@ function heuristicScores(text: string): RiskScores {
 }
 
 async function requestModelScores(modelId: string, text: string): Promise<ModelScoreResult> {
+  const modelConfig = MODEL_CONFIGS[modelId] ?? MODEL_CONFIGS[DEFAULT_MODEL_ID];
   const classifier = await getClassifier(modelId);
-  const payload = await classifier(text.slice(0, 1000), { top_k: 10 });
+  const preparedText = text.slice(0, 1000);
+
+  if (modelConfig.task === 'zero-shot-classification') {
+    const zeroShot = modelConfig.zeroShot;
+    if (!zeroShot) return { scores: emptyRiskScores(), safeScore: 0 };
+    const payload = await classifier(
+      preparedText,
+      Object.values(zeroShot.candidateLabels),
+      {
+        multi_label: zeroShot.multiLabel ?? true,
+        hypothesis_template: zeroShot.hypothesisTemplate ?? 'This text is about {}.',
+      }
+    );
+    const labels = normalizeZeroShotScores(payload);
+    return extractZeroShotScores(modelConfig, labels);
+  }
+
+  const payload = await classifier(preparedText, { top_k: 10 });
   const labels = normalizeLabelScores(payload);
   return extractModelScores(modelId, labels);
 }
@@ -1861,8 +2067,29 @@ async function requestModelScoresWithConfig(
   text: string,
   config: RuntimeEngineConfig
 ): Promise<ModelScoreResult> {
+  const modelConfig = MODEL_CONFIGS[modelId] ?? MODEL_CONFIGS[DEFAULT_MODEL_ID];
   const classifier = await getClassifier(modelId);
-  const payload = await classifier(text.slice(0, config.maxAnalysisChars), { top_k: config.modelTopK });
+  const preparedText = text.slice(0, config.maxAnalysisChars);
+
+  if (modelConfig.task === 'zero-shot-classification') {
+    const zeroShot = modelConfig.zeroShot;
+    if (!zeroShot) return { scores: emptyRiskScores(), safeScore: 0 };
+    const payload = await classifier(
+      preparedText,
+      Object.values(zeroShot.candidateLabels),
+      {
+        multi_label: zeroShot.multiLabel ?? true,
+        hypothesis_template: zeroShot.hypothesisTemplate ?? 'This text is about {}.',
+      }
+    );
+    const labels = normalizeZeroShotScores(payload);
+    if (labels.length === 0) {
+      throw new Error('Zero-shot inference returned empty labels');
+    }
+    return extractZeroShotScores(modelConfig, labels);
+  }
+
+  const payload = await classifier(preparedText, { top_k: config.modelTopK });
   const labels = normalizeLabelScores(payload);
   return extractModelScores(modelId, labels);
 }

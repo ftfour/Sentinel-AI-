@@ -123,6 +123,36 @@ const MODEL_OPTIONS: ModelOption[] = [
     summary: 'Alternative ONNX export that may improve throughput on some CPUs.',
     bestFor: 'Maximum throughput testing',
   },
+  {
+    id: 'hf/bert-mini-toxicity-quant',
+    name: 'BERT Mini Toxicity (Multilingual Quantized)',
+    summary: 'Compact multilingual toxicity model with low RAM usage.',
+    bestFor: 'Minimal VPS resources',
+  },
+  {
+    id: 'hf/bert-small-toxicity-quant',
+    name: 'BERT Small Toxicity (Multilingual Quantized)',
+    summary: 'Balanced multilingual toxicity model with higher quality than mini.',
+    bestFor: 'Balanced quality/speed',
+  },
+  {
+    id: 'hf/distilbert-multilingual-toxicity-quant',
+    name: 'DistilBERT Multilingual Toxicity (Quantized)',
+    summary: 'Broader multilingual coverage for mixed-language chats.',
+    bestFor: 'Mixed RU/EN chat streams',
+  },
+  {
+    id: 'zero-shot/xenova-mdeberta-v3-xnli',
+    name: 'mDeBERTa-v3 XNLI (Zero-Shot)',
+    summary: 'Zero-shot multilingual NLI model for custom moderation categories.',
+    bestFor: 'Scam/drugs/recruitment/terrorism category detection',
+  },
+  {
+    id: 'zero-shot/mdeberta-v3-mnli-xnli',
+    name: 'mDeBERTa-v3 MNLI/XNLI (Zero-Shot)',
+    summary: 'Stronger multilingual zero-shot model, heavier than toxicity classifiers.',
+    bestFor: 'Higher quality on diverse category semantics',
+  },
 ];
 
 const DEFAULT_SCAM_TRIGGERS = [
