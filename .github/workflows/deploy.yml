@@ -40,7 +40,6 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: ${{ secrets.DEPLOY_PORT }}
-          script_stop: true
           envs: REPO_URL,BRANCH,APP_DIR
           script: |
             set -euo pipefail
