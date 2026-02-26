@@ -6,6 +6,8 @@ import { TelegramClient } from 'telegram';
 import { StringSession } from 'telegram/sessions/index.js';
 import { NewMessage } from 'telegram/events/index.js';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 // Define a custom session type
 declare module 'express-session' {
@@ -18,23 +20,37 @@ declare module 'express-session' {
 }
 
 const app = express();
+const isProduction = process.env.NODE_ENV === 'production';
+const PORT = Number(process.env.PORT ?? 3000);
+const SESSION_SECRET = process.env.SESSION_SECRET ?? 'change-me-in-production';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+type UserRole = 'admin' | 'viewer';
+type UserStore = Record<string, { password: string; role: UserRole }>;
+
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
 // Session middleware
 app.use(
   session({
-    secret: 'supersecretkey', // Replace with a real secret in a real app
+    secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, httpOnly: true, maxAge: 24 * 60 * 60 * 1000 }, // 1 day
+    cookie: {
+      secure: isProduction,
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000, // 1 day
+    },
   })
 );
 
 // In-memory user store
-const users = {
-  admin: { password: '1q2w3e4r', role: 'admin' },
-  viewer: { password: '1234', role: 'viewer' },
+const users: UserStore = {
+  admin: { password: process.env.ADMIN_PASSWORD ?? '1q2w3e4r', role: 'admin' },
+  viewer: { password: process.env.VIEWER_PASSWORD ?? '1234', role: 'viewer' },
 };
 
 let client: TelegramClient | null = null;
@@ -172,17 +188,32 @@ app.get('/api/stats', isAuthenticated, (req, res) => {
 });
 
 async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
+  if (!isProduction) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static('dist'));
+    if (SESSION_SECRET === 'change-me-in-production') {
+      console.warn(
+        'SESSION_SECRET is not configured. Set a strong value in .env for production.'
+      );
+    }
+
+    const distDir = path.resolve(__dirname, 'dist');
+    app.use(express.static(distDir));
+
+    // SPA fallback for React Router routes like /login.
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api')) {
+        next();
+        return;
+      }
+      res.sendFile(path.join(distDir, 'index.html'));
+    });
   }
 
-  const PORT = 3000;
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });

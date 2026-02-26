@@ -1,139 +1,98 @@
-# Sentinel AI RU
+﻿# Sentinel AI RU
 
-Sentinel AI RU is a full-stack monitoring dashboard prototype for Telegram messages.
-The project combines:
-- a React + Vite frontend,
-- an Express backend API,
-- a Telegram client listener (`telegram` package),
-- session-based authentication.
-
-The backend and frontend are served by a single Node.js process.
+Sentinel AI RU is a full-stack Telegram monitoring dashboard prototype.
+The app runs as a single Node.js process that serves:
+- frontend (React + Vite),
+- backend API (Express),
+- Telegram listener control endpoints.
 
 ## Features
 
-- Login with role-based access (`admin`, `viewer`)
-- Start/stop Telegram monitoring from the UI
-- Collect recent messages in memory
-- Basic threat stats aggregation (`safe`, `toxicity`, `threat`, `scam`)
-- Live dashboard UI with charts and logs
+- Role-based login (`admin`, `viewer`)
+- Start/stop monitoring from UI
+- Recent messages and threat stats
+- API for engine status and telemetry
 
-## Tech Stack
+## Stack
 
-- Node.js + TypeScript
+- Node.js 22 + TypeScript
 - Express + express-session + cors
 - React 19 + react-router-dom
-- Vite 6 + Tailwind CSS
-- Telegram MTProto client (`telegram`)
+- Vite 6 + Tailwind
+- Telegram client (`telegram`)
 
-## Project Structure
+## Structure
 
 ```text
 .
-|-- src/
-|   |-- App.tsx
-|   |-- LoginPage.tsx
-|   |-- main.tsx
-|   `-- index.css
+|-- .github/workflows/deploy.yml
+|-- ecosystem.config.cjs
 |-- server.ts
-|-- vite.config.ts
+|-- src/
 |-- package.json
 `-- .env.example
 ```
 
-## Requirements
-
-- Node.js 22.x (recommended)
-- npm 10+ (or compatible)
-
 ## Environment Variables
 
-The repository ships with `.env.example`.
+Create `.env` using `.env.example`.
 
-Current environment variables used in the project:
+- `NODE_ENV` - use `production` on server
+- `PORT` - app port, default `3000`
+- `SESSION_SECRET` - session cookie secret
+- `ADMIN_PASSWORD` - password for `admin`
+- `VIEWER_PASSWORD` - password for `viewer`
+- `APP_URL` - optional app URL metadata
 
-- `APP_URL` (from `.env.example`) - optional metadata URL.
-- `NODE_ENV` - controls dev/prod mode in `server.ts`.
-
-Important current behavior:
-- The server port is currently hardcoded to `3000` in `server.ts`.
-- Session secret is currently hardcoded in code and should be externalized before production use.
-
-## Local Development
-
-1. Install dependencies:
+## Local Run
 
 ```bash
 npm ci
-```
-
-2. Prepare environment file:
-
-```bash
 cp .env.example .env
-```
-
-3. Start development server:
-
-```bash
 npm run dev
 ```
 
-4. Open:
+Open `http://localhost:3000`
 
-```text
-http://localhost:3000
-```
-
-## Build and Run (Production Mode)
-
-1. Build frontend assets:
+## Manual Production Run
 
 ```bash
+npm ci
 npm run build
+NODE_ENV=production npm run start
 ```
 
-2. Start server in production mode:
+## NPM Scripts
 
-```bash
-NODE_ENV=production npx tsx server.ts
-```
+- `npm run dev` - dev mode (`tsx server.ts` + Vite middleware)
+- `npm run start` - server start (`tsx server.ts`)
+- `npm run build` - frontend build to `dist`
+- `npm run lint` - TypeScript type check
+- `npm run preview` - Vite preview
 
-The backend will serve static files from `dist/`.
+## API
 
-## Available Scripts
-
-- `npm run dev` - run full app in development mode (`tsx server.ts` + Vite middleware)
-- `npm run build` - build frontend with Vite
-- `npm run preview` - Vite preview for frontend bundle only
-- `npm run lint` - TypeScript type check (`tsc --noEmit`)
-- `npm run clean` - remove `dist` folder
-
-## Authentication
-
-The current implementation uses in-memory users defined in `server.ts`:
-
-- `admin`
-- `viewer`
-
-Passwords are currently hardcoded in source code. Replace this with secure credential storage before any real deployment.
-
-## API Endpoints
-
-Auth:
 - `POST /api/login`
 - `POST /api/logout`
 - `GET /api/user`
-
-Engine:
 - `POST /api/start` (admin only)
 - `POST /api/stop` (admin only)
 - `GET /api/status`
 - `GET /api/messages`
 - `GET /api/stats`
 
-## Deployment Example (VPS with PM2 + Nginx)
+## Deploy From GitHub To Server
 
-1. Install runtime dependencies on server:
+CI/CD workflow is implemented in [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml).
+
+Flow:
+1. Push to `main`
+2. GitHub Actions builds project
+3. Workflow connects to VPS over SSH
+4. Runs `git pull`, `npm ci`, `npm run build`
+5. Restarts app with PM2 (`pm2 startOrReload`)
+
+### 1) One-Time Server Bootstrap (Ubuntu)
 
 ```bash
 sudo apt update
@@ -141,36 +100,82 @@ sudo apt install -y curl git nginx build-essential
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
 sudo npm i -g pm2
+mkdir -p /opt/sentinel-ai-ru
 ```
 
-2. Deploy app:
+### 2) Create `.env` On Server
 
 ```bash
-git clone <your-repo-url> /opt/sentinel-ai-ru
 cd /opt/sentinel-ai-ru
-npm ci
-npm run build
 cp .env.example .env
-NODE_ENV=production pm2 start "npx tsx server.ts" --name sentinel-ai-ru
-pm2 save
-pm2 startup
+nano .env
 ```
 
-3. Configure Nginx reverse proxy to `http://127.0.0.1:3000`.
+Required values:
+- `SESSION_SECRET`
+- `ADMIN_PASSWORD`
+- `VIEWER_PASSWORD`
+- optional `PORT`
 
-## Known Production Gaps
+### 3) Add GitHub Repository Secrets
 
-- `express-session` uses default `MemoryStore` (not suitable for production scale).
-- Session secret is hardcoded.
-- Demo users and passwords are hardcoded.
-- Message and stats storage are in memory (data is lost on restart).
-- `BrowserRouter` may require explicit SPA fallback handling for deep links.
+Go to `Settings -> Secrets and variables -> Actions` and add:
 
-## Recommended Next Steps
+- `DEPLOY_HOST` - server IP or domain
+- `DEPLOY_USER` - SSH user
+- `DEPLOY_SSH_KEY` - private SSH key (multiline)
+- `DEPLOY_PORT` - SSH port (usually `22`)
+- `APP_DIR` - app directory on server (example `/opt/sentinel-ai-ru`)
 
-- Move secrets and credentials to environment variables.
-- Replace memory session store with Redis or another persistent session backend.
-- Add persistent database for users, messages, and stats.
-- Add SPA fallback route in production static serving.
-- Add Dockerfile and CI pipeline.
+### 4) Trigger Deploy
 
+- push to `main`, or
+- run manually: `Actions -> Deploy To Server -> Run workflow`
+
+## PM2
+
+PM2 config: [`ecosystem.config.cjs`](./ecosystem.config.cjs)
+
+Useful server commands:
+
+```bash
+pm2 status
+pm2 logs sentinel-ai-ru
+pm2 restart sentinel-ai-ru
+pm2 save
+```
+
+## Nginx Reverse Proxy
+
+```nginx
+server {
+  listen 80;
+  server_name your-domain.com;
+
+  location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+  }
+}
+```
+
+Apply config:
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+## Production Improvements Included
+
+- `PORT` is read from env
+- `SESSION_SECRET` is read from env
+- secure cookies enabled in production
+- SPA fallback for React routes is enabled
+- auto deploy workflow from GitHub is added
