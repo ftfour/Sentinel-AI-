@@ -129,7 +129,7 @@ function SentinelApp() {
     apiHash: 'a1b2c3d4e5f6g7h8i9j0',
     botToken: '',
     sessionName: 'sentinel_session',
-    targetChats: ['8683661077:AAE5OWXP2UMP7PbYvpwFELf69JoQOx2dQko'],
+    targetChats: ['-1003803680927'],
     newChatInput: '',
     proxyEnabled: false,
     proxyType: 'SOCKS5',
