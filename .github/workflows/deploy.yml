@@ -58,7 +58,7 @@ jobs:
             git checkout "$BRANCH"
             git pull --ff-only origin "$BRANCH"
 
-            npm ci
+            npm install --no-audit --no-fund --omit=optional
             npm run build
 
             if ! command -v pm2 >/dev/null 2>&1; then
