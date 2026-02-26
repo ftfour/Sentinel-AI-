@@ -139,6 +139,7 @@ const MODEL_CONFIGS: Record<string, ThreatModelConfig> = {
 const DEFAULT_MODEL_ID = 'local/rubert-tiny-balanced';
 type TextClassifier = (text: string, options?: { top_k?: number }) => Promise<unknown>;
 const classifierCache = new Map<string, Promise<TextClassifier>>();
+const SAFE_LABEL_HINTS = ['non-toxic', 'not-toxic', 'safe', 'neutral', 'label-0'];
 const HEURISTIC_PATTERNS: Record<RiskCategory, RegExp[]> = {
   toxicity: [
     /идиот/i,
@@ -276,8 +277,21 @@ function normalizeLabelScores(payload: unknown): LabelScore[] {
     .filter((entry) => entry.label.length > 0);
 }
 
+function normalizeLabelKey(value: string): string {
+  return value.toLowerCase().replace(/[_\s]+/g, '-').trim();
+}
+
+function isSafeLabel(label: string): boolean {
+  const normalized = normalizeLabelKey(label);
+  if (SAFE_LABEL_HINTS.includes(normalized)) return true;
+  if (normalized.startsWith('non-toxic')) return true;
+  if (normalized.startsWith('not-toxic')) return true;
+  return false;
+}
+
 function matchesAnyHint(label: string, hints: string[]): boolean {
-  return hints.some((hint) => label.includes(hint));
+  const normalizedLabel = normalizeLabelKey(label);
+  return hints.some((hint) => normalizedLabel.includes(normalizeLabelKey(hint)));
 }
 
 function extractModelScores(modelId: string, labels: LabelScore[]): RiskScores {
@@ -285,7 +299,11 @@ function extractModelScores(modelId: string, labels: LabelScore[]): RiskScores {
   const config = MODEL_CONFIGS[modelId] ?? MODEL_CONFIGS[DEFAULT_MODEL_ID];
 
   for (const { label: rawLabel, score } of labels) {
-    const label = rawLabel.toLowerCase();
+    const label = normalizeLabelKey(rawLabel);
+
+    if (isSafeLabel(label)) {
+      continue;
+    }
 
     if (matchesAnyHint(label, config.labelHints.toxicity)) {
       scores.toxicity = Math.max(scores.toxicity, score);
