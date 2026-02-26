@@ -120,6 +120,8 @@ type SettingsState = {
   botToken: string;
   sessionString: string;
   sessionName: string;
+  botTargetChats: string[];
+  userTargetChats: string[];
   targetChats: string[];
   newChatInput: string;
   proxyEnabled: boolean;
@@ -152,6 +154,8 @@ const DEFAULT_SETTINGS: SettingsState = {
   botToken: '',
   sessionString: '',
   sessionName: 'sentinel_session',
+  botTargetChats: ['-1003803680927'],
+  userTargetChats: ['-1003803680927'],
   targetChats: ['-1003803680927'],
   newChatInput: '',
   proxyEnabled: false,
@@ -168,6 +172,47 @@ const DEFAULT_SETTINGS: SettingsState = {
   threatThreshold: 75,
 };
 
+function normalizeChatList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const unique = new Set<string>();
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const normalized = item.trim();
+    if (!normalized || unique.has(normalized)) continue;
+    unique.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function toChatList(value: unknown, fallback: string[]): string[] {
+  const normalized = normalizeChatList(value);
+  return normalized.length > 0 ? normalized : fallback;
+}
+
+function resolveTargetChatsForMode(
+  source: Partial<Pick<SettingsState, 'targetChats' | 'botTargetChats' | 'userTargetChats'>>,
+  mode: 'bot' | 'user',
+  fallback: string[]
+): string[] {
+  const modeValue = mode === 'bot' ? source.botTargetChats : source.userTargetChats;
+  const modeChats = normalizeChatList(modeValue);
+  if (modeChats.length > 0) {
+    return modeChats;
+  }
+
+  const legacyChats = normalizeChatList(source.targetChats);
+  if (legacyChats.length > 0) {
+    return legacyChats;
+  }
+
+  return [...fallback];
+}
+
 // --- MAIN APP COMPONENT ---
 function SentinelApp() {
   const { user, logout } = useAuth();
@@ -181,7 +226,10 @@ function SentinelApp() {
   // Settings State
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
-  const [availableChats, setAvailableChats] = useState<AvailableTelegramChat[]>([]);
+  const [availableChatsByMode, setAvailableChatsByMode] = useState<Record<'bot' | 'user', AvailableTelegramChat[]>>({
+    bot: [],
+    user: [],
+  });
   const [isLoadingAvailableChats, setIsLoadingAvailableChats] = useState(false);
   const [sessionPhoneNumber, setSessionPhoneNumber] = useState('');
   const [sessionRequestId, setSessionRequestId] = useState('');
@@ -198,6 +246,7 @@ function SentinelApp() {
     engineControl: 0,
   });
   const selectedModel = MODEL_OPTIONS.find((model) => model.id === settings.mlModel) ?? MODEL_OPTIONS[0];
+  const availableChats = availableChatsByMode[settings.authMode];
 
   // --- DATA FETCHING ---
   useEffect(() => {
@@ -256,7 +305,9 @@ function SentinelApp() {
     botToken: source.botToken,
     sessionString: source.sessionString,
     sessionName: source.sessionName,
-    targetChats: source.targetChats,
+    botTargetChats: source.botTargetChats,
+    userTargetChats: source.userTargetChats,
+    targetChats: source.authMode === 'bot' ? source.botTargetChats : source.userTargetChats,
     proxyEnabled: source.proxyEnabled,
     proxyType: source.proxyType,
     proxyHost: source.proxyHost,
@@ -290,6 +341,44 @@ function SentinelApp() {
   const cooldownText = (key: CooldownKey): string => {
     const seconds = cooldowns[key];
     return seconds > 0 ? `${seconds}s` : '';
+  };
+
+  const mergePersistedSettings = (prev: SettingsState, saved: any): SettingsState => {
+    const authMode: 'bot' | 'user' =
+      saved?.authMode === 'user' || saved?.authMode === 'bot' ? saved.authMode : prev.authMode;
+    const fallbackBotTargetChats = resolveTargetChatsForMode(prev, 'bot', DEFAULT_SETTINGS.botTargetChats);
+    const fallbackUserTargetChats = resolveTargetChatsForMode(prev, 'user', DEFAULT_SETTINGS.userTargetChats);
+    const legacyTargetChats = toChatList(
+      saved?.targetChats,
+      authMode === 'bot' ? fallbackBotTargetChats : fallbackUserTargetChats
+    );
+    const botTargetChats = Array.isArray(saved?.botTargetChats)
+      ? toChatList(saved.botTargetChats, fallbackBotTargetChats)
+      : authMode === 'bot'
+        ? legacyTargetChats
+        : fallbackBotTargetChats;
+    const userTargetChats = Array.isArray(saved?.userTargetChats)
+      ? toChatList(saved.userTargetChats, fallbackUserTargetChats)
+      : authMode === 'user'
+        ? legacyTargetChats
+        : fallbackUserTargetChats;
+
+    return {
+      ...prev,
+      ...saved,
+      authMode,
+      sessionString: typeof saved?.sessionString === 'string' ? saved.sessionString : prev.sessionString,
+      botTargetChats,
+      userTargetChats,
+      targetChats: authMode === 'bot' ? botTargetChats : userTargetChats,
+      keywords: Array.isArray(saved?.keywords) ? saved.keywords : prev.keywords,
+      mediaTypes: {
+        ...prev.mediaTypes,
+        ...(saved?.mediaTypes ?? {}),
+      },
+      newChatInput: '',
+      newKeywordInput: '',
+    };
   };
 
   const loadAvailableChats = async (
@@ -363,7 +452,10 @@ function SentinelApp() {
             }))
         : [];
 
-      setAvailableChats(chats);
+      setAvailableChatsByMode((prev) => ({
+        ...prev,
+        [authMode]: chats,
+      }));
     } catch (err) {
       console.error('Failed to load available Telegram chats', err);
       if (showNotification) {
@@ -496,20 +588,7 @@ function SentinelApp() {
         const saved = await res.json();
         if (cancelled) return;
 
-        setSettings((prev) => ({
-          ...prev,
-          ...saved,
-          authMode: saved?.authMode === 'user' || saved?.authMode === 'bot' ? saved.authMode : prev.authMode,
-          sessionString: typeof saved?.sessionString === 'string' ? saved.sessionString : prev.sessionString,
-          targetChats: Array.isArray(saved?.targetChats) ? saved.targetChats : prev.targetChats,
-          keywords: Array.isArray(saved?.keywords) ? saved.keywords : prev.keywords,
-          mediaTypes: {
-            ...prev.mediaTypes,
-            ...(saved?.mediaTypes ?? {}),
-          },
-          newChatInput: '',
-          newKeywordInput: '',
-        }));
+        setSettings((prev) => mergePersistedSettings(prev, saved));
 
       } catch (err) {
         console.error('Failed to load saved settings', err);
@@ -559,12 +638,7 @@ function SentinelApp() {
       }
 
       if (data?.settings) {
-        setSettings((prev) => ({
-          ...prev,
-          ...data.settings,
-          newChatInput: '',
-          newKeywordInput: '',
-        }));
+        setSettings((prev) => mergePersistedSettings(prev, data.settings));
       }
 
       if (showNotification) {
@@ -647,24 +721,40 @@ function SentinelApp() {
   // --- HANDLERS ---
   const handleAddChat = () => {
     const normalizedChat = settings.newChatInput.trim();
-    if (normalizedChat && !settings.targetChats.includes(normalizedChat)) {
-      setSettings(s => ({ ...s, targetChats: [...s.targetChats, normalizedChat], newChatInput: '' }));
-    }
+    if (!normalizedChat) return;
+
+    setSettings((prev) => {
+      const activeChats = prev.authMode === 'bot' ? prev.botTargetChats : prev.userTargetChats;
+      const nextChats = activeChats.includes(normalizedChat) ? activeChats : [...activeChats, normalizedChat];
+      if (prev.authMode === 'bot') {
+        return { ...prev, botTargetChats: nextChats, targetChats: nextChats, newChatInput: '' };
+      }
+      return { ...prev, userTargetChats: nextChats, targetChats: nextChats, newChatInput: '' };
+    });
   };
 
   const handleRemoveChat = (chat: string) => {
-    setSettings(s => ({ ...s, targetChats: s.targetChats.filter(c => c !== chat) }));
+    setSettings((prev) => {
+      const activeChats = prev.authMode === 'bot' ? prev.botTargetChats : prev.userTargetChats;
+      const nextChats = activeChats.filter((c) => c !== chat);
+      if (prev.authMode === 'bot') {
+        return { ...prev, botTargetChats: nextChats, targetChats: nextChats };
+      }
+      return { ...prev, userTargetChats: nextChats, targetChats: nextChats };
+    });
   };
 
   const handleToggleAvailableChat = (chatId: string) => {
     setSettings((prev) => {
-      const isSelected = prev.targetChats.includes(chatId);
-      return {
-        ...prev,
-        targetChats: isSelected
-          ? prev.targetChats.filter((chat) => chat !== chatId)
-          : [...prev.targetChats, chatId],
-      };
+      const activeChats = prev.authMode === 'bot' ? prev.botTargetChats : prev.userTargetChats;
+      const isSelected = activeChats.includes(chatId);
+      const nextChats = isSelected
+        ? activeChats.filter((chat) => chat !== chatId)
+        : [...activeChats, chatId];
+      if (prev.authMode === 'bot') {
+        return { ...prev, botTargetChats: nextChats, targetChats: nextChats };
+      }
+      return { ...prev, userTargetChats: nextChats, targetChats: nextChats };
     });
   };
 
@@ -853,7 +943,14 @@ function SentinelApp() {
               <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Auth Mode</label>
               <select
                 value={settings.authMode}
-                onChange={e => setSettings({...settings, authMode: e.target.value as 'bot' | 'user'})}
+                onChange={e => {
+                  const nextMode = e.target.value as 'bot' | 'user';
+                  setSettings((prev) => ({
+                    ...prev,
+                    authMode: nextMode,
+                    targetChats: [...(nextMode === 'bot' ? prev.botTargetChats : prev.userTargetChats)],
+                  }));
+                }}
                 className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all"
               >
                 <option value="bot">Bot Token</option>

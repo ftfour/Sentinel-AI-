@@ -41,6 +41,8 @@ type PersistedAppSettings = {
   botToken: string;
   sessionString: string;
   sessionName: string;
+  botTargetChats: string[];
+  userTargetChats: string[];
   targetChats: string[];
   proxyEnabled: boolean;
   proxyType: string;
@@ -225,6 +227,8 @@ const DEFAULT_PERSISTED_SETTINGS: PersistedAppSettings = {
   botToken: '',
   sessionString: '',
   sessionName: 'sentinel_session',
+  botTargetChats: ['-1003803680927'],
+  userTargetChats: ['-1003803680927'],
   targetChats: ['-1003803680927'],
   proxyEnabled: false,
   proxyType: 'SOCKS5',
@@ -301,14 +305,24 @@ function toBooleanValue(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
-function toStringArray(value: unknown, fallback: string[]): string[] {
+function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
-    return fallback;
+    return [];
   }
-  const result = value
-    .filter((item) => typeof item === 'string')
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
+  const unique = new Set<string>();
+  const result: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const normalized = item.trim();
+    if (!normalized || unique.has(normalized)) continue;
+    unique.add(normalized);
+    result.push(normalized);
+  }
+  return result;
+}
+
+function toStringArray(value: unknown, fallback: string[]): string[] {
+  const result = normalizeStringArray(value);
   return result.length > 0 ? result : fallback;
 }
 
@@ -325,6 +339,25 @@ function normalizeAuthMode(value: unknown, fallback: TelegramAuthMode): Telegram
   return value === 'user' || value === 'bot' ? value : fallback;
 }
 
+function resolveTargetChatsForMode(
+  source: Partial<Pick<PersistedAppSettings, 'targetChats' | 'botTargetChats' | 'userTargetChats'>>,
+  mode: TelegramAuthMode,
+  fallback: string[]
+): string[] {
+  const modeValue = mode === 'bot' ? source.botTargetChats : source.userTargetChats;
+  const modeChats = normalizeStringArray(modeValue);
+  if (modeChats.length > 0) {
+    return modeChats;
+  }
+
+  const legacyChats = normalizeStringArray(source.targetChats);
+  if (legacyChats.length > 0) {
+    return legacyChats;
+  }
+
+  return [...fallback];
+}
+
 function sanitizePersistedSettings(
   input: unknown,
   fallback: PersistedAppSettings = DEFAULT_PERSISTED_SETTINGS
@@ -337,15 +370,43 @@ function sanitizePersistedSettings(
 
   const mlModelCandidate = toStringValue(raw.mlModel, fallback.mlModel);
   const mlModel = MODEL_CONFIGS[mlModelCandidate] ? mlModelCandidate : fallback.mlModel;
+  const authMode = normalizeAuthMode(raw.authMode, fallback.authMode);
+  const fallbackBotTargetChats = resolveTargetChatsForMode(
+    fallback,
+    'bot',
+    DEFAULT_PERSISTED_SETTINGS.botTargetChats
+  );
+  const fallbackUserTargetChats = resolveTargetChatsForMode(
+    fallback,
+    'user',
+    DEFAULT_PERSISTED_SETTINGS.userTargetChats
+  );
+  const legacyTargetChats = toStringArray(
+    raw.targetChats,
+    authMode === 'bot' ? fallbackBotTargetChats : fallbackUserTargetChats
+  );
+  const botTargetChats = Array.isArray(raw.botTargetChats)
+    ? toStringArray(raw.botTargetChats, fallbackBotTargetChats)
+    : authMode === 'bot'
+      ? legacyTargetChats
+      : fallbackBotTargetChats;
+  const userTargetChats = Array.isArray(raw.userTargetChats)
+    ? toStringArray(raw.userTargetChats, fallbackUserTargetChats)
+    : authMode === 'user'
+      ? legacyTargetChats
+      : fallbackUserTargetChats;
+  const targetChats = authMode === 'bot' ? botTargetChats : userTargetChats;
 
   return {
     apiId: toStringValue(raw.apiId, fallback.apiId),
     apiHash: toStringValue(raw.apiHash, fallback.apiHash),
-    authMode: normalizeAuthMode(raw.authMode, fallback.authMode),
+    authMode,
     botToken: toStringValue(raw.botToken, fallback.botToken),
     sessionString: toStringValue(raw.sessionString, fallback.sessionString),
     sessionName: toStringValue(raw.sessionName, fallback.sessionName),
-    targetChats: toStringArray(raw.targetChats, fallback.targetChats),
+    botTargetChats,
+    userTargetChats,
+    targetChats,
     proxyEnabled: toBooleanValue(raw.proxyEnabled, fallback.proxyEnabled),
     proxyType: toStringValue(raw.proxyType, fallback.proxyType),
     proxyHost: toStringValue(raw.proxyHost, fallback.proxyHost),
@@ -726,14 +787,22 @@ async function runWithUserSessionClient<T>(
 function applyPersistedSettings(settings: PersistedAppSettings): void {
   selectedModelId = settings.mlModel;
   threatThreshold = settings.threatThreshold / 100;
-  targetChats = [...settings.targetChats];
+  targetChats = resolveTargetChatsForMode(
+    settings,
+    settings.authMode,
+    DEFAULT_PERSISTED_SETTINGS.targetChats
+  );
   runtimeAuthMode = settings.authMode;
 }
 
 let persistedSettings = loadPersistedSettings();
 let selectedModelId = persistedSettings.mlModel;
 let threatThreshold = persistedSettings.threatThreshold / 100;
-let targetChats: string[] = [...persistedSettings.targetChats];
+let targetChats: string[] = resolveTargetChatsForMode(
+  persistedSettings,
+  persistedSettings.authMode,
+  DEFAULT_PERSISTED_SETTINGS.targetChats
+);
 let runtimeAuthMode: TelegramAuthMode = persistedSettings.authMode;
 applyPersistedSettings(persistedSettings);
 if (!fs.existsSync(SETTINGS_FILE)) {
@@ -1083,7 +1152,10 @@ app.post('/api/telegram/chats', isAdmin, RL_CHAT_SYNC, async (req, res) => {
           if (!creds.botToken) {
             return res.status(400).json({ error: 'Session belongs to bot account. Switch Auth Mode to Bot Token.' });
           }
-          chats = await collectTelegramChatsViaBotApi(creds.botToken, persistedSettings.targetChats);
+          chats = await collectTelegramChatsViaBotApi(
+            creds.botToken,
+            resolveTargetChatsForMode(persistedSettings, 'bot', DEFAULT_PERSISTED_SETTINGS.botTargetChats)
+          );
         } else {
           throw error;
         }
@@ -1092,7 +1164,10 @@ app.post('/api/telegram/chats', isAdmin, RL_CHAT_SYNC, async (req, res) => {
       if (!creds.botToken) {
         return res.status(400).json({ error: 'Bot Token is required for bot mode' });
       }
-      chats = await collectTelegramChatsViaBotApi(creds.botToken, persistedSettings.targetChats);
+      chats = await collectTelegramChatsViaBotApi(
+        creds.botToken,
+        resolveTargetChatsForMode(persistedSettings, 'bot', DEFAULT_PERSISTED_SETTINGS.botTargetChats)
+      );
     }
 
     res.json({ chats });
@@ -1292,9 +1367,14 @@ app.post('/api/start', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
   const resolvedAuthMode = normalizeAuthMode(authMode, persistedSettings.authMode);
   const resolvedBotToken = toStringValue(botToken, persistedSettings.botToken).trim();
   const resolvedSessionString = toStringValue(sessionString, persistedSettings.sessionString).trim();
+  const persistedModeChats = resolveTargetChatsForMode(
+    persistedSettings,
+    resolvedAuthMode,
+    DEFAULT_PERSISTED_SETTINGS.targetChats
+  );
   const resolvedChats = Array.isArray(chats)
-    ? toStringArray(chats, persistedSettings.targetChats)
-    : persistedSettings.targetChats;
+    ? toStringArray(chats, persistedModeChats)
+    : persistedModeChats;
   const resolvedModel = typeof model === 'string' && MODEL_CONFIGS[model] ? model : persistedSettings.mlModel;
   const resolvedThreshold =
     requestedThreshold === undefined
