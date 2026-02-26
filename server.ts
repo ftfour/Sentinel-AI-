@@ -55,6 +55,18 @@ type PersistedAppSettings = {
   mlModel: string;
   threatThreshold: number; // 1..99
 };
+type TelegramBotCredentials = {
+  apiId: number;
+  apiHash: string;
+  botToken: string;
+};
+type TelegramChatSummary = {
+  id: string;
+  title: string;
+  username: string | null;
+  type: 'group' | 'supergroup' | 'channel';
+  avatar: string | null;
+};
 
 fs.mkdirSync(MODEL_CACHE_DIR, { recursive: true });
 fs.mkdirSync(RUNTIME_DIR, { recursive: true });
@@ -321,6 +333,154 @@ function savePersistedSettings(settings: PersistedAppSettings): void {
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
 }
 
+function parsePositiveInteger(value: string): number | null {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function resolveTelegramCredentials(source: unknown): {
+  apiId: string;
+  apiHash: string;
+  botToken: string;
+} {
+  const raw = typeof source === 'object' && source !== null ? (source as Record<string, unknown>) : {};
+  return {
+    apiId: toStringValue(raw.apiId, persistedSettings.apiId).trim(),
+    apiHash: toStringValue(raw.apiHash, persistedSettings.apiHash).trim(),
+    botToken: toStringValue(raw.botToken, persistedSettings.botToken).trim(),
+  };
+}
+
+function resolveChatType(dialog: any): TelegramChatSummary['type'] | null {
+  if (!dialog) return null;
+  if (dialog.isGroup) {
+    return 'group';
+  }
+  if (!dialog.isChannel) {
+    return null;
+  }
+
+  const entity = dialog.entity as Record<string, unknown> | undefined;
+  if (entity?.megagroup === true) {
+    return 'supergroup';
+  }
+  return 'channel';
+}
+
+function resolveChatTitle(dialog: any): string {
+  const title = typeof dialog?.title === 'string' && dialog.title.trim().length > 0
+    ? dialog.title.trim()
+    : typeof dialog?.name === 'string' && dialog.name.trim().length > 0
+      ? dialog.name.trim()
+      : 'Unknown Chat';
+  return title;
+}
+
+function resolveChatUsername(dialog: any): string | null {
+  const entity = dialog?.entity as Record<string, unknown> | undefined;
+  if (!entity) return null;
+  const username = entity.username;
+  if (typeof username === 'string' && username.trim().length > 0) {
+    return username.trim();
+  }
+  return null;
+}
+
+async function resolveChatAvatar(clientRef: TelegramClient, entity: unknown): Promise<string | null> {
+  try {
+    const profilePhoto = await clientRef.downloadProfilePhoto(entity as any, { isBig: false });
+    if (Buffer.isBuffer(profilePhoto) && profilePhoto.length > 0) {
+      return `data:image/jpeg;base64,${profilePhoto.toString('base64')}`;
+    }
+    if (typeof profilePhoto === 'string' && fs.existsSync(profilePhoto)) {
+      const bytes = fs.readFileSync(profilePhoto);
+      try {
+        fs.unlinkSync(profilePhoto);
+      } catch {
+        // ignore cleanup errors
+      }
+      if (bytes.length > 0) {
+        return `data:image/jpeg;base64,${bytes.toString('base64')}`;
+      }
+    }
+  } catch (error) {
+    console.warn(`Failed to fetch chat avatar: ${(error as Error).message}`);
+  }
+  return null;
+}
+
+async function collectTelegramChats(clientRef: TelegramClient): Promise<TelegramChatSummary[]> {
+  const dialogs = await clientRef.getDialogs({ limit: 200 });
+  const chats: TelegramChatSummary[] = [];
+  const knownChatIds = new Set<string>();
+
+  for (const dialog of dialogs) {
+    const chatType = resolveChatType(dialog);
+    if (!chatType) {
+      continue;
+    }
+
+    const peer = dialog.entity ?? dialog.inputEntity;
+    if (!peer) {
+      continue;
+    }
+
+    let chatId = '';
+    try {
+      chatId = await clientRef.getPeerId(peer);
+    } catch {
+      continue;
+    }
+    if (!chatId || knownChatIds.has(chatId)) {
+      continue;
+    }
+
+    knownChatIds.add(chatId);
+    chats.push({
+      id: chatId,
+      title: resolveChatTitle(dialog),
+      username: resolveChatUsername(dialog),
+      type: chatType,
+      avatar: dialog.entity ? await resolveChatAvatar(clientRef, dialog.entity) : null,
+    });
+
+    if (chats.length >= 120) {
+      break;
+    }
+  }
+
+  chats.sort((left, right) => left.title.localeCompare(right.title, 'ru', { sensitivity: 'base' }));
+  return chats;
+}
+
+async function runWithBotClient<T>(
+  credentials: TelegramBotCredentials,
+  reuseRunningClient: boolean,
+  action: (clientRef: TelegramClient) => Promise<T>
+): Promise<T> {
+  if (reuseRunningClient && client && isRunning) {
+    return action(client);
+  }
+
+  const tempSession = new StringSession('');
+  const tempClient = new TelegramClient(tempSession, credentials.apiId, credentials.apiHash, {
+    connectionRetries: 3,
+  });
+
+  await tempClient.start({
+    botAuthToken: credentials.botToken,
+  });
+
+  try {
+    return await action(tempClient);
+  } finally {
+    await tempClient.disconnect().catch(() => undefined);
+  }
+}
+
 function applyPersistedSettings(settings: PersistedAppSettings): void {
   selectedModelId = settings.mlModel;
   threatThreshold = settings.threatThreshold / 100;
@@ -394,6 +554,40 @@ app.post('/api/settings', isAdmin, (req, res) => {
   applyPersistedSettings(merged);
   savePersistedSettings(merged);
   res.json({ status: 'saved', settings: merged });
+});
+
+app.post('/api/telegram/chats', isAdmin, async (req, res) => {
+  const creds = resolveTelegramCredentials(req.body);
+  if (!creds.apiId || !creds.apiHash || !creds.botToken) {
+    return res.status(400).json({ error: 'API ID, API Hash, and Bot Token are required' });
+  }
+
+  const parsedApiId = parsePositiveInteger(creds.apiId);
+  if (!parsedApiId) {
+    return res.status(400).json({ error: 'API ID must be a positive integer' });
+  }
+
+  const reuseRunningClient =
+    !!client &&
+    isRunning &&
+    creds.apiId === persistedSettings.apiId &&
+    creds.apiHash === persistedSettings.apiHash &&
+    creds.botToken === persistedSettings.botToken;
+
+  try {
+    const chats = await runWithBotClient(
+      {
+        apiId: parsedApiId,
+        apiHash: creds.apiHash,
+        botToken: creds.botToken,
+      },
+      reuseRunningClient,
+      collectTelegramChats
+    );
+    res.json({ chats });
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
 });
 
 function emptyRiskScores(): RiskScores {

@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Link, Navigate, Outlet } from '
 import LoginPage from './LoginPage';
 import { 
   Shield, Activity, Settings, Terminal, Play, Square, 
-  Plus, Trash2, Save, AlertTriangle, MessageSquare, FileText, 
+  Plus, Trash2, Save, AlertTriangle, MessageSquare, FileText, RefreshCw,
   Image as ImageIcon, Video, Link as LinkIcon, Globe, Lock, Database, Cpu
 } from 'lucide-react';
 import { 
@@ -134,6 +134,14 @@ type SettingsState = {
   threatThreshold: number;
 };
 
+type AvailableTelegramChat = {
+  id: string;
+  title: string;
+  username: string | null;
+  type: 'group' | 'supergroup' | 'channel';
+  avatar: string | null;
+};
+
 const DEFAULT_SETTINGS: SettingsState = {
   apiId: '',
   apiHash: '',
@@ -168,6 +176,8 @@ function SentinelApp() {
   // Settings State
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [availableChats, setAvailableChats] = useState<AvailableTelegramChat[]>([]);
+  const [isLoadingAvailableChats, setIsLoadingAvailableChats] = useState(false);
   const selectedModel = MODEL_OPTIONS.find((model) => model.id === settings.mlModel) ?? MODEL_OPTIONS[0];
 
   // --- DATA FETCHING ---
@@ -223,6 +233,62 @@ function SentinelApp() {
     threatThreshold: source.threatThreshold,
   });
 
+  const loadAvailableChats = async (
+    credentials?: Partial<Pick<SettingsState, 'apiId' | 'apiHash' | 'botToken'>>,
+    showNotification = true
+  ): Promise<void> => {
+    if (!user || user.role !== 'admin') return;
+
+    const apiId = (credentials?.apiId ?? settings.apiId).trim();
+    const apiHash = (credentials?.apiHash ?? settings.apiHash).trim();
+    const botToken = (credentials?.botToken ?? settings.botToken).trim();
+
+    if (!apiId || !apiHash || !botToken) {
+      if (showNotification) {
+        alert('Fill API ID, API Hash and Bot Token first, then sync chats.');
+      }
+      return;
+    }
+
+    setIsLoadingAvailableChats(true);
+    try {
+      const res = await fetch('/api/telegram/chats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiId, apiHash, botToken }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error ?? 'Failed to load Telegram chats');
+      }
+
+      const chats: AvailableTelegramChat[] = Array.isArray(data?.chats)
+        ? data.chats
+            .filter((item: any) => item && typeof item.id === 'string')
+            .map((item: any) => ({
+              id: String(item.id),
+              title: typeof item.title === 'string' && item.title.trim().length > 0 ? item.title.trim() : 'Unknown Chat',
+              username: typeof item.username === 'string' && item.username.trim().length > 0 ? item.username.trim() : null,
+              type:
+                item.type === 'group' || item.type === 'supergroup' || item.type === 'channel'
+                  ? item.type
+                  : 'group',
+              avatar: typeof item.avatar === 'string' && item.avatar.length > 0 ? item.avatar : null,
+            }))
+        : [];
+
+      setAvailableChats(chats);
+    } catch (err) {
+      console.error('Failed to load available Telegram chats', err);
+      if (showNotification) {
+        alert(`Failed to load Telegram chats: ${(err as Error).message}`);
+      }
+    } finally {
+      setIsLoadingAvailableChats(false);
+    }
+  };
+
   useEffect(() => {
     if (!user || user.role !== 'admin') return;
     let cancelled = false;
@@ -247,6 +313,16 @@ function SentinelApp() {
           newChatInput: '',
           newKeywordInput: '',
         }));
+
+        const savedApiId = typeof saved?.apiId === 'string' ? saved.apiId.trim() : '';
+        const savedApiHash = typeof saved?.apiHash === 'string' ? saved.apiHash.trim() : '';
+        const savedBotToken = typeof saved?.botToken === 'string' ? saved.botToken.trim() : '';
+        if (savedApiId && savedApiHash && savedBotToken) {
+          void loadAvailableChats(
+            { apiId: savedApiId, apiHash: savedApiHash, botToken: savedBotToken },
+            false
+          );
+        }
       } catch (err) {
         console.error('Failed to load saved settings', err);
       }
@@ -342,13 +418,26 @@ function SentinelApp() {
 
   // --- HANDLERS ---
   const handleAddChat = () => {
-    if (settings.newChatInput && !settings.targetChats.includes(settings.newChatInput)) {
-      setSettings(s => ({ ...s, targetChats: [...s.targetChats, s.newChatInput], newChatInput: '' }));
+    const normalizedChat = settings.newChatInput.trim();
+    if (normalizedChat && !settings.targetChats.includes(normalizedChat)) {
+      setSettings(s => ({ ...s, targetChats: [...s.targetChats, normalizedChat], newChatInput: '' }));
     }
   };
 
   const handleRemoveChat = (chat: string) => {
     setSettings(s => ({ ...s, targetChats: s.targetChats.filter(c => c !== chat) }));
+  };
+
+  const handleToggleAvailableChat = (chatId: string) => {
+    setSettings((prev) => {
+      const isSelected = prev.targetChats.includes(chatId);
+      return {
+        ...prev,
+        targetChats: isSelected
+          ? prev.targetChats.filter((chat) => chat !== chatId)
+          : [...prev.targetChats, chatId],
+      };
+    });
   };
 
   const handleAddKeyword = () => {
@@ -360,6 +449,9 @@ function SentinelApp() {
   const handleRemoveKeyword = (kw: string) => {
     setSettings(s => ({ ...s, keywords: s.keywords.filter(k => k !== kw) }));
   };
+
+  const availableChatIds = new Set(availableChats.map((chat) => chat.id));
+  const manualTargetChats = settings.targetChats.filter((chatId) => !availableChatIds.has(chatId));
 
   // --- RENDERERS ---
   const renderDashboard = () => {
@@ -560,45 +652,134 @@ function SentinelApp() {
               <Globe className="w-5 h-5 mr-3 text-emerald-400" />
               <h2 className="text-base font-semibold text-slate-200">Целевые чаты и каналы</h2>
             </div>
-            <div className="p-6 flex-1 flex flex-col">
-              <div className="flex space-x-2 mb-4">
-                <input 
-                  type="text" 
-                  value={settings.newChatInput}
-                  onChange={e => setSettings({...settings, newChatInput: e.target.value})}
-                  onKeyDown={e => e.key === 'Enter' && handleAddChat()}
-                  className="flex-1 bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all"
-                  placeholder="@имя_пользователя, t.me/ссылка, или ID"
-                />
-                <button 
-                  onClick={handleAddChat}
-                  className="bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 px-4 py-2 rounded-lg transition-colors flex items-center"
+            <div className="p-6 flex-1 flex flex-col space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Sync groups/channels available for this bot and select targets.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void loadAvailableChats(undefined, true)}
+                  disabled={isLoadingAvailableChats}
+                  className={cn(
+                    "inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors",
+                    isLoadingAvailableChats
+                      ? "border-slate-700 text-slate-500 cursor-not-allowed"
+                      : "border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/10"
+                  )}
                 >
-                  <Plus className="w-4 h-4" />
+                  <RefreshCw className={cn("w-4 h-4", isLoadingAvailableChats && "animate-spin")} />
+                  {isLoadingAvailableChats ? 'Syncing...' : 'Sync list'}
                 </button>
               </div>
-              <div className="flex-1 bg-[#0A0A0B] border border-slate-800 rounded-lg p-2 overflow-y-auto max-h-[200px] custom-scrollbar">
-                {settings.targetChats.length === 0 ? (
-                  <div className="text-center text-slate-500 text-sm py-4">Цели не добавлены.</div>
+
+              <div className="flex-1 bg-[#0A0A0B] border border-slate-800 rounded-lg p-2 overflow-y-auto max-h-[260px] custom-scrollbar">
+                {isLoadingAvailableChats ? (
+                  <div className="text-center text-slate-500 text-sm py-6">Loading Telegram chats...</div>
+                ) : availableChats.length === 0 ? (
+                  <div className="text-center text-slate-500 text-sm py-6">
+                    No chats loaded yet. Click "Sync list" after filling Telegram credentials.
+                  </div>
                 ) : (
                   <ul className="space-y-1">
-                    {settings.targetChats.map((chat, idx) => (
-                      <li key={idx} className="flex items-center justify-between px-3 py-2 hover:bg-slate-800/50 rounded-md group">
-                        <span className="text-sm text-slate-300 font-mono">{chat}</span>
-                        <button 
-                          onClick={() => handleRemoveChat(chat)}
-                          className="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </li>
-                    ))}
+                    {availableChats.map((chat) => {
+                      const selected = settings.targetChats.includes(chat.id);
+                      const chatInitial = chat.title.trim().charAt(0).toUpperCase() || '?';
+                      return (
+                        <li key={chat.id}>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleAvailableChat(chat.id)}
+                            className={cn(
+                              "w-full flex items-center gap-3 px-3 py-2 rounded-md border transition-colors text-left",
+                              selected
+                                ? "border-emerald-500/30 bg-emerald-500/10"
+                                : "border-transparent hover:border-slate-700 hover:bg-slate-800/40"
+                            )}
+                          >
+                            <div
+                              className={cn(
+                                "w-4 h-4 rounded border flex items-center justify-center text-[10px] font-bold",
+                                selected
+                                  ? "border-emerald-400 text-emerald-300 bg-emerald-500/20"
+                                  : "border-slate-600 text-transparent"
+                              )}
+                            >
+                              v
+                            </div>
+                            <div className="w-9 h-9 rounded-full overflow-hidden bg-slate-800 border border-slate-700 shrink-0 flex items-center justify-center text-xs text-slate-300 font-semibold">
+                              {chat.avatar ? (
+                                <img src={chat.avatar} alt={chat.title} className="w-full h-full object-cover" />
+                              ) : (
+                                <span>{chatInitial}</span>
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-slate-200 truncate">{chat.title}</div>
+                              <div className="text-[11px] text-slate-500 truncate">
+                                {chat.username ? `@${chat.username}` : chat.id}
+                              </div>
+                            </div>
+                            <span className="text-[10px] uppercase tracking-wide text-slate-400 bg-slate-800/80 border border-slate-700 px-2 py-1 rounded">
+                              {chat.type}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span>Selected targets: {settings.targetChats.length}</span>
+                <span>Available chats: {availableChats.length}</span>
+              </div>
+
+              <div className="pt-4 border-t border-slate-800 space-y-3">
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+                  Manual target (optional)
+                </label>
+                <div className="flex space-x-2">
+                  <input
+                    type="text"
+                    value={settings.newChatInput}
+                    onChange={e => setSettings({...settings, newChatInput: e.target.value})}
+                    onKeyDown={e => e.key === 'Enter' && handleAddChat()}
+                    className="flex-1 bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all"
+                    placeholder="@username, t.me/link, or numeric chat id"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddChat}
+                    className="bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 px-4 py-2 rounded-lg transition-colors flex items-center"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {manualTargetChats.length > 0 && (
+                  <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-2">
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Manual targets</div>
+                    <ul className="space-y-1">
+                      {manualTargetChats.map((chatId) => (
+                        <li key={chatId} className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-slate-800/50">
+                          <span className="text-xs text-slate-300 font-mono">{chatId}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveChat(chatId)}
+                            className="text-slate-500 hover:text-red-400"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </div>
             </div>
           </div>
-
           {/* Keyword Filters */}
           <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden flex flex-col">
             <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center">
@@ -938,3 +1119,4 @@ export default function App() {
     </AuthProvider>
   )
 }
+
