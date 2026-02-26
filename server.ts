@@ -41,6 +41,7 @@ type PersistedAppSettings = {
   botToken: string;
   sessionString: string;
   sessionName: string;
+  userAuthAllMessages: boolean;
   botTargetChats: string[];
   userTargetChats: string[];
   targetChats: string[];
@@ -227,6 +228,7 @@ const DEFAULT_PERSISTED_SETTINGS: PersistedAppSettings = {
   botToken: '',
   sessionString: '',
   sessionName: 'sentinel_session',
+  userAuthAllMessages: false,
   botTargetChats: ['-1003803680927'],
   userTargetChats: ['-1003803680927'],
   targetChats: ['-1003803680927'],
@@ -404,6 +406,7 @@ function sanitizePersistedSettings(
     botToken: toStringValue(raw.botToken, fallback.botToken),
     sessionString: toStringValue(raw.sessionString, fallback.sessionString),
     sessionName: toStringValue(raw.sessionName, fallback.sessionName),
+    userAuthAllMessages: toBooleanValue(raw.userAuthAllMessages, fallback.userAuthAllMessages),
     botTargetChats,
     userTargetChats,
     targetChats,
@@ -792,6 +795,7 @@ function applyPersistedSettings(settings: PersistedAppSettings): void {
     settings.authMode,
     DEFAULT_PERSISTED_SETTINGS.targetChats
   );
+  monitorAllUserAuthMessages = settings.userAuthAllMessages;
   runtimeAuthMode = settings.authMode;
 }
 
@@ -803,6 +807,7 @@ let targetChats: string[] = resolveTargetChatsForMode(
   persistedSettings.authMode,
   DEFAULT_PERSISTED_SETTINGS.targetChats
 );
+let monitorAllUserAuthMessages = persistedSettings.userAuthAllMessages;
 let runtimeAuthMode: TelegramAuthMode = persistedSettings.authMode;
 applyPersistedSettings(persistedSettings);
 if (!fs.existsSync(SETTINGS_FILE)) {
@@ -1358,6 +1363,7 @@ app.post('/api/start', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
     authMode,
     botToken,
     sessionString,
+    userAuthAllMessages,
     chats,
     model,
     threatThreshold: requestedThreshold
@@ -1367,6 +1373,7 @@ app.post('/api/start', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
   const resolvedAuthMode = normalizeAuthMode(authMode, persistedSettings.authMode);
   const resolvedBotToken = toStringValue(botToken, persistedSettings.botToken).trim();
   const resolvedSessionString = toStringValue(sessionString, persistedSettings.sessionString).trim();
+  const resolvedUserAuthAllMessages = toBooleanValue(userAuthAllMessages, persistedSettings.userAuthAllMessages);
   const persistedModeChats = resolveTargetChatsForMode(
     persistedSettings,
     resolvedAuthMode,
@@ -1405,6 +1412,7 @@ app.post('/api/start', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
       authMode: resolvedAuthMode,
       botToken: resolvedBotToken,
       sessionString: resolvedSessionString,
+      userAuthAllMessages: resolvedUserAuthAllMessages,
       targetChats: resolvedChats,
       mlModel: resolvedModel,
       threatThreshold: Math.round(resolvedThreshold * 100),
@@ -1455,6 +1463,11 @@ app.post('/api/start', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
 
     isRunning = true;
     runtimeAuthMode = resolvedAuthMode;
+    monitorAllUserAuthMessages = resolvedUserAuthAllMessages;
+    const shouldMonitorAllDialogs = resolvedAuthMode === 'user' && monitorAllUserAuthMessages;
+    const eventChatFilter = shouldMonitorAllDialogs
+      ? undefined
+      : (targetChats.length > 0 ? targetChats : undefined);
     
     client.addEventHandler(async (event) => {
       const message = event.message;
@@ -1480,7 +1493,7 @@ app.post('/api/start', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
       });
       
       if (recentMessages.length > 50) recentMessages.pop();
-    }, new NewMessage({ chats: targetChats.length > 0 ? targetChats : undefined }));
+    }, new NewMessage({ chats: eventChatFilter }));
     
     res.json({
       status: 'started',

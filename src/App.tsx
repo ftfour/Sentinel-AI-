@@ -120,6 +120,7 @@ type SettingsState = {
   botToken: string;
   sessionString: string;
   sessionName: string;
+  userAuthAllMessages: boolean;
   botTargetChats: string[];
   userTargetChats: string[];
   targetChats: string[];
@@ -154,6 +155,7 @@ const DEFAULT_SETTINGS: SettingsState = {
   botToken: '',
   sessionString: '',
   sessionName: 'sentinel_session',
+  userAuthAllMessages: false,
   botTargetChats: ['-1003803680927'],
   userTargetChats: ['-1003803680927'],
   targetChats: ['-1003803680927'],
@@ -305,6 +307,7 @@ function SentinelApp() {
     botToken: source.botToken,
     sessionString: source.sessionString,
     sessionName: source.sessionName,
+    userAuthAllMessages: source.userAuthAllMessages,
     botTargetChats: source.botTargetChats,
     userTargetChats: source.userTargetChats,
     targetChats: source.authMode === 'bot' ? source.botTargetChats : source.userTargetChats,
@@ -368,6 +371,9 @@ function SentinelApp() {
       ...saved,
       authMode,
       sessionString: typeof saved?.sessionString === 'string' ? saved.sessionString : prev.sessionString,
+      userAuthAllMessages: typeof saved?.userAuthAllMessages === 'boolean'
+        ? saved.userAuthAllMessages
+        : prev.userAuthAllMessages,
       botTargetChats,
       userTargetChats,
       targetChats: authMode === 'bot' ? botTargetChats : userTargetChats,
@@ -692,6 +698,7 @@ function SentinelApp() {
             authMode: settings.authMode,
             botToken: settings.botToken,
             sessionString: settings.sessionString,
+            userAuthAllMessages: settings.userAuthAllMessages,
             chats: settings.targetChats,
             model: settings.mlModel,
             threatThreshold: settings.threatThreshold / 100
@@ -758,6 +765,31 @@ function SentinelApp() {
     });
   };
 
+  const handleSelectAllAvailableChats = () => {
+    if (availableChats.length === 0) return;
+    setSettings((prev) => {
+      const activeChats = prev.authMode === 'bot' ? prev.botTargetChats : prev.userTargetChats;
+      const mergedChats = Array.from(new Set([...activeChats, ...availableChats.map((chat) => chat.id)]));
+      if (prev.authMode === 'bot') {
+        return { ...prev, botTargetChats: mergedChats, targetChats: mergedChats };
+      }
+      return { ...prev, userTargetChats: mergedChats, targetChats: mergedChats };
+    });
+  };
+
+  const handleClearAvailableChats = () => {
+    if (availableChats.length === 0) return;
+    const availableIds = new Set(availableChats.map((chat) => chat.id));
+    setSettings((prev) => {
+      const activeChats = prev.authMode === 'bot' ? prev.botTargetChats : prev.userTargetChats;
+      const nextChats = activeChats.filter((chatId) => !availableIds.has(chatId));
+      if (prev.authMode === 'bot') {
+        return { ...prev, botTargetChats: nextChats, targetChats: nextChats };
+      }
+      return { ...prev, userTargetChats: nextChats, targetChats: nextChats };
+    });
+  };
+
   const handleAddKeyword = () => {
     if (settings.newKeywordInput && !settings.keywords.includes(settings.newKeywordInput)) {
       setSettings(s => ({ ...s, keywords: [...s.keywords, s.newKeywordInput], newKeywordInput: '' }));
@@ -770,6 +802,11 @@ function SentinelApp() {
 
   const availableChatIds = new Set(availableChats.map((chat) => chat.id));
   const manualTargetChats = settings.targetChats.filter((chatId) => !availableChatIds.has(chatId));
+  const selectedAvailableCount = availableChats.reduce(
+    (count, chat) => (settings.targetChats.includes(chat.id) ? count + 1 : count),
+    0
+  );
+  const allAvailableSelected = availableChats.length > 0 && selectedAvailableCount === availableChats.length;
 
   // --- RENDERERS ---
   const renderDashboard = () => {
@@ -1062,25 +1099,72 @@ function SentinelApp() {
                 <p className="text-xs text-slate-400 leading-relaxed">
                   Sync groups/channels for current auth mode and select targets.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => void loadAvailableChats(undefined, true)}
-                  disabled={isLoadingAvailableChats || cooldowns.syncChats > 0}
-                  className={cn(
-                    "inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors",
-                    isLoadingAvailableChats || cooldowns.syncChats > 0
-                      ? "border-slate-700 text-slate-500 cursor-not-allowed"
-                      : "border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/10"
-                  )}
-                >
-                  <RefreshCw className={cn("w-4 h-4", isLoadingAvailableChats && "animate-spin")} />
-                  {isLoadingAvailableChats
-                    ? 'Syncing...'
-                    : cooldowns.syncChats > 0
-                      ? `Cooldown ${cooldownText('syncChats')}`
-                      : 'Sync list'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSelectAllAvailableChats}
+                    disabled={isLoadingAvailableChats || availableChats.length === 0 || allAvailableSelected}
+                    className={cn(
+                      "inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors",
+                      isLoadingAvailableChats || availableChats.length === 0 || allAvailableSelected
+                        ? "border-slate-700 text-slate-500 cursor-not-allowed"
+                        : "border-sky-500/20 text-sky-300 hover:bg-sky-500/10"
+                    )}
+                  >
+                    Select All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearAvailableChats}
+                    disabled={isLoadingAvailableChats || selectedAvailableCount === 0}
+                    className={cn(
+                      "inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors",
+                      isLoadingAvailableChats || selectedAvailableCount === 0
+                        ? "border-slate-700 text-slate-500 cursor-not-allowed"
+                        : "border-rose-500/20 text-rose-300 hover:bg-rose-500/10"
+                    )}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void loadAvailableChats(undefined, true)}
+                    disabled={isLoadingAvailableChats || cooldowns.syncChats > 0}
+                    className={cn(
+                      "inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors",
+                      isLoadingAvailableChats || cooldowns.syncChats > 0
+                        ? "border-slate-700 text-slate-500 cursor-not-allowed"
+                        : "border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/10"
+                    )}
+                  >
+                    <RefreshCw className={cn("w-4 h-4", isLoadingAvailableChats && "animate-spin")} />
+                    {isLoadingAvailableChats
+                      ? 'Syncing...'
+                      : cooldowns.syncChats > 0
+                        ? `Cooldown ${cooldownText('syncChats')}`
+                        : 'Sync list'}
+                  </button>
+                </div>
               </div>
+
+              {settings.authMode === 'user' && (
+                <div className="rounded-lg border border-slate-700 bg-slate-900/40 px-3 py-2">
+                  <label className="flex items-center justify-between gap-3 cursor-pointer">
+                    <div>
+                      <div className="text-xs font-medium text-slate-200">Process all incoming messages</div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        When enabled, account mode ignores target list and listens to all dialogs.
+                      </div>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={settings.userAuthAllMessages}
+                      onChange={() => setSettings((prev) => ({ ...prev, userAuthAllMessages: !prev.userAuthAllMessages }))}
+                      className="h-4 w-4 accent-emerald-500"
+                    />
+                  </label>
+                </div>
+              )}
 
               <div className="flex-1 bg-[#0A0A0B] border border-slate-800 rounded-lg p-2 overflow-y-auto max-h-[260px] custom-scrollbar">
                 {isLoadingAvailableChats ? (
@@ -1142,8 +1226,13 @@ function SentinelApp() {
 
               <div className="flex items-center justify-between text-xs text-slate-500">
                 <span>Selected targets: {settings.targetChats.length}</span>
-                <span>Available chats: {availableChats.length}</span>
+                <span>Selected in list: {selectedAvailableCount} / {availableChats.length}</span>
               </div>
+              {settings.authMode === 'user' && settings.userAuthAllMessages && (
+                <div className="text-[11px] text-emerald-300">
+                  All incoming account messages mode is enabled. Target list is saved but ignored while this mode is on.
+                </div>
+              )}
 
               <div className="pt-4 border-t border-slate-800 space-y-3">
                 <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">
