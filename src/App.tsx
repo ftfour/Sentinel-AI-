@@ -147,6 +147,7 @@ type AvailableTelegramChat = {
   avatar: string | null;
 };
 type CooldownKey = 'saveSettings' | 'syncChats' | 'sessionCode' | 'sessionConfirm' | 'engineControl';
+type ActiveTab = 'dashboard' | 'agents' | 'engine' | 'proxy' | 'logs';
 
 const DEFAULT_SETTINGS: SettingsState = {
   apiId: '',
@@ -218,7 +219,7 @@ function resolveTargetChatsForMode(
 // --- MAIN APP COMPONENT ---
 function SentinelApp() {
   const { user, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<'панель' | 'настройки' | 'журналы'>('панель');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isRunning, setIsRunning] = useState(false);
   
   // Dashboard State
@@ -963,11 +964,13 @@ function SentinelApp() {
     );
   };
 
-  const renderSettings = () => {
+  const renderSettings = (section: 'agents' | 'engine' | 'proxy') => {
     if (user.role !== 'admin') return null;
     return (
       <div className="space-y-6 animate-in fade-in duration-300 max-w-5xl mx-auto pb-12">
         
+        {section === 'agents' && (
+          <>
         {/* Section 1: Authentication */}
         <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center">
@@ -1104,10 +1107,12 @@ function SentinelApp() {
             )}
           </div>
         </div>
+          </>
+        )}
 
-        {/* Section 2: Targets & Filters */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Targets */}
+        {(section === 'agents' || section === 'engine') && (
+          <div className={cn("grid gap-6", section === 'agents' ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1")}>
+          {section === 'agents' && (
           <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden flex flex-col">
             <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center">
               <Globe className="w-5 h-5 mr-3 text-emerald-400" />
@@ -1297,7 +1302,8 @@ function SentinelApp() {
               </div>
             </div>
           </div>
-          {/* Keyword Filters */}
+          )}
+          {section === 'engine' && (
           <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden flex flex-col">
             <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center">
               <MessageSquare className="w-5 h-5 mr-3 text-amber-400" />
@@ -1332,9 +1338,45 @@ function SentinelApp() {
               </div>
             </div>
           </div>
-        </div>
+          )}
+          {section === 'agents' && (
+          <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center">
+              <Database className="w-5 h-5 mr-3 text-cyan-400" />
+              <h2 className="text-base font-semibold text-slate-200">ВК (заглушка)</h2>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-slate-400">
+                Здесь будут настройки интеграции VK: токен, список сообществ и режимы мониторинга.
+              </p>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">VK Access Token</label>
+                <input
+                  type="password"
+                  disabled
+                  className="w-full bg-[#0A0A0B] border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-slate-500 cursor-not-allowed"
+                  placeholder="Будет добавлено позже"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">Community / Group</label>
+                <input
+                  type="text"
+                  disabled
+                  className="w-full bg-[#0A0A0B] border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-slate-500 cursor-not-allowed"
+                  placeholder="Например, club123456"
+                />
+              </div>
+              <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 text-xs text-slate-500">
+                Статус: модуль VK пока не подключен.
+              </div>
+            </div>
+          </div>
+          )}
+          </div>
+        )}
 
-        {/* Section 3: Connection & Proxy */}
+        {section === 'proxy' && (
         <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between">
             <div className="flex items-center">
@@ -1412,8 +1454,9 @@ function SentinelApp() {
             </div>
           )}
         </div>
+        )}
 
-        {/* Section 4: ML & Processing */}
+        {section === 'engine' && (
         <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center">
             <Cpu className="w-5 h-5 mr-3 text-violet-400" />
@@ -1495,6 +1538,7 @@ function SentinelApp() {
             </div>
           </div>
         </div>
+        )}
 
         {/* Save Button */}
         <div className="flex justify-end pt-4">
@@ -1534,30 +1578,50 @@ function SentinelApp() {
         
         <nav className="flex-1 px-4 py-6 space-y-1">
           <button 
-            onClick={() => setActiveTab('панель')}
+            onClick={() => setActiveTab('dashboard')}
             className={cn(
               "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-              activeTab === 'панель' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+              activeTab === 'dashboard' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
             )}
           >
             <Activity className="w-4 h-4 mr-3" /> Панель
           </button>
           {user.role === 'admin' && (
-            <button 
-              onClick={() => setActiveTab('настройки')}
-              className={cn(
-                "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-                activeTab === 'настройки' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
-              )}
-            >
-              <Settings className="w-4 h-4 mr-3" /> Конфигурация
-            </button>
+            <>
+              <button
+                onClick={() => setActiveTab('agents')}
+                className={cn(
+                  "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  activeTab === 'agents' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                )}
+              >
+                <Settings className="w-4 h-4 mr-3" /> {'\u0410\u0433\u0435\u043d\u0442\u044b'}
+              </button>
+              <button
+                onClick={() => setActiveTab('engine')}
+                className={cn(
+                  "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  activeTab === 'engine' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                )}
+              >
+                <Cpu className="w-4 h-4 mr-3" /> {'\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430 \u0434\u0432\u0438\u0436\u043a\u0430'}
+              </button>
+              <button
+                onClick={() => setActiveTab('proxy')}
+                className={cn(
+                  "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  activeTab === 'proxy' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                )}
+              >
+                <LinkIcon className="w-4 h-4 mr-3" /> {'\u041f\u0440\u043e\u043a\u0441\u0438'}
+              </button>
+            </>
           )}
           <button 
-            onClick={() => setActiveTab('журналы')}
+            onClick={() => setActiveTab('logs')}
             className={cn(
               "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
-              activeTab === 'журналы' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+              activeTab === 'logs' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
             )}
           >
             <Database className="w-4 h-4 mr-3" /> Системные журналы
@@ -1580,7 +1644,7 @@ function SentinelApp() {
         {/* Header */}
         <header className="h-16 border-b border-slate-800/60 bg-[#0A0A0B]/80 backdrop-blur-md flex items-center justify-between px-8 sticky top-0 z-10">
           <h2 className="text-lg font-medium text-slate-100 capitalize">
-            {activeTab === 'настройки' && user.role !== 'admin' ? 'Панель' : activeTab}
+            {activeTab === 'dashboard' ? 'Панель' : activeTab === 'agents' ? 'Агенты' : activeTab === 'engine' ? 'Настройка движка' : activeTab === 'proxy' ? 'Прокси' : 'Системные журналы'}
           </h2>
           
           <div className="flex items-center space-x-4">
@@ -1616,9 +1680,11 @@ function SentinelApp() {
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-          {activeTab === 'панель' && renderDashboard()}
-          {activeTab === 'настройки' && renderSettings()}
-          {activeTab === 'журналы' && (
+          {activeTab === 'dashboard' && renderDashboard()}
+          {activeTab === 'agents' && renderSettings('agents')}
+          {activeTab === 'engine' && renderSettings('engine')}
+          {activeTab === 'proxy' && renderSettings('proxy')}
+          {activeTab === 'logs' && (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-4">
               <Terminal className="w-12 h-12 opacity-20" />
               <p className="font-mono text-sm">Системные журналы появятся здесь при подключении к бэкенду.</p>
@@ -1644,5 +1710,4 @@ export default function App() {
     </AuthProvider>
   )
 }
-
 
