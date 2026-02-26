@@ -58,7 +58,21 @@ jobs:
             git checkout "$BRANCH"
             git pull --ff-only origin "$BRANCH"
 
-            npm install --no-audit --no-fund --omit=optional
+            LOCK_HASH_FILE=".deploy-package-lock.sha256"
+            CURRENT_LOCK_HASH="$(sha256sum package-lock.json | awk '{print $1}')"
+            SAVED_LOCK_HASH=""
+            if [ -f "$LOCK_HASH_FILE" ]; then
+              SAVED_LOCK_HASH="$(cat "$LOCK_HASH_FILE")"
+            fi
+
+            if [ ! -d node_modules ] || [ "$CURRENT_LOCK_HASH" != "$SAVED_LOCK_HASH" ]; then
+              export npm_config_jobs=1
+              npm install --no-audit --no-fund --omit=optional --prefer-offline
+              echo "$CURRENT_LOCK_HASH" > "$LOCK_HASH_FILE"
+            else
+              echo "Dependencies unchanged, skipping npm install."
+            fi
+
             npm run build
 
             if ! command -v pm2 >/dev/null 2>&1; then
