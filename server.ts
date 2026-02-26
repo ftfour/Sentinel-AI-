@@ -67,6 +67,22 @@ type TelegramChatSummary = {
   type: 'group' | 'supergroup' | 'channel';
   avatar: string | null;
 };
+type BotApiResponse<T> = {
+  ok: boolean;
+  result?: T;
+  description?: string;
+  error_code?: number;
+};
+type BotApiChat = {
+  id: number | string;
+  type?: string;
+  title?: string;
+  username?: string;
+  photo?: {
+    small_file_id?: string;
+    big_file_id?: string;
+  };
+};
 
 fs.mkdirSync(MODEL_CACHE_DIR, { recursive: true });
 fs.mkdirSync(RUNTIME_DIR, { recursive: true });
@@ -412,6 +428,162 @@ async function resolveChatAvatar(clientRef: TelegramClient, entity: unknown): Pr
   return null;
 }
 
+async function callTelegramBotApi<T>(
+  botToken: string,
+  method: string,
+  payload?: Record<string, unknown>
+): Promise<T> {
+  const url = `https://api.telegram.org/bot${botToken}/${method}`;
+  const response = await fetch(url, {
+    method: payload ? 'POST' : 'GET',
+    headers: payload ? { 'Content-Type': 'application/json' } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
+
+  const data = (await response.json()) as BotApiResponse<T>;
+  if (!response.ok || !data.ok || data.result === undefined) {
+    const description = data.description ?? `Telegram Bot API ${method} failed`;
+    throw new Error(description);
+  }
+
+  return data.result;
+}
+
+function toTelegramChatType(value: unknown): TelegramChatSummary['type'] {
+  if (value === 'channel') return 'channel';
+  if (value === 'supergroup') return 'supergroup';
+  return 'group';
+}
+
+function inferChatTypeFromId(chatId: string): TelegramChatSummary['type'] {
+  if (chatId.startsWith('-100')) {
+    return 'supergroup';
+  }
+  return 'group';
+}
+
+async function resolveBotApiChatAvatar(botToken: string, chat: BotApiChat): Promise<string | null> {
+  const fileId = chat.photo?.small_file_id ?? chat.photo?.big_file_id;
+  if (!fileId) {
+    return null;
+  }
+
+  try {
+    const fileInfo = await callTelegramBotApi<{ file_path?: string }>(botToken, 'getFile', { file_id: fileId });
+    if (!fileInfo.file_path) {
+      return null;
+    }
+
+    const fileResponse = await fetch(`https://api.telegram.org/file/bot${botToken}/${fileInfo.file_path}`);
+    if (!fileResponse.ok) {
+      return null;
+    }
+
+    const bytes = Buffer.from(await fileResponse.arrayBuffer());
+    if (bytes.length === 0) {
+      return null;
+    }
+
+    return `data:image/jpeg;base64,${bytes.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
+
+function extractChatsFromBotUpdates(updates: Array<Record<string, unknown>>): BotApiChat[] {
+  const result: BotApiChat[] = [];
+  const seen = new Set<string>();
+
+  const pushChat = (value: unknown) => {
+    if (typeof value !== 'object' || value === null) return;
+    const chat = value as BotApiChat;
+    const id = String(chat.id ?? '');
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    result.push(chat);
+  };
+
+  for (const update of updates) {
+    const candidate = update as Record<string, any>;
+    pushChat(candidate.message?.chat);
+    pushChat(candidate.edited_message?.chat);
+    pushChat(candidate.channel_post?.chat);
+    pushChat(candidate.edited_channel_post?.chat);
+    pushChat(candidate.my_chat_member?.chat);
+    pushChat(candidate.chat_member?.chat);
+  }
+
+  return result;
+}
+
+async function collectTelegramChatsViaBotApi(
+  botToken: string,
+  fallbackTargetChats: string[]
+): Promise<TelegramChatSummary[]> {
+  const updates = await callTelegramBotApi<Array<Record<string, unknown>>>(botToken, 'getUpdates', {
+    limit: 100,
+    timeout: 0,
+    allowed_updates: [
+      'message',
+      'edited_message',
+      'channel_post',
+      'edited_channel_post',
+      'my_chat_member',
+      'chat_member',
+    ],
+  });
+
+  const chatsById = new Map<string, TelegramChatSummary>();
+  const updateChats = extractChatsFromBotUpdates(updates);
+
+  for (const updateChat of updateChats.slice(0, 80)) {
+    const chatId = String(updateChat.id ?? '').trim();
+    if (!chatId) continue;
+
+    let detailedChat: BotApiChat = updateChat;
+    try {
+      detailedChat = await callTelegramBotApi<BotApiChat>(botToken, 'getChat', { chat_id: chatId });
+    } catch {
+      // keep update payload if getChat is unavailable
+    }
+
+    chatsById.set(chatId, {
+      id: chatId,
+      title:
+        (typeof detailedChat.title === 'string' && detailedChat.title.trim()) ||
+        (typeof detailedChat.username === 'string' && `@${detailedChat.username.trim()}`) ||
+        `Chat ${chatId}`,
+      username:
+        typeof detailedChat.username === 'string' && detailedChat.username.trim().length > 0
+          ? detailedChat.username.trim()
+          : null,
+      type: toTelegramChatType(detailedChat.type),
+      avatar: await resolveBotApiChatAvatar(botToken, detailedChat),
+    });
+  }
+
+  for (const chatIdRaw of fallbackTargetChats) {
+    const chatId = String(chatIdRaw).trim();
+    if (!chatId || chatsById.has(chatId)) continue;
+    chatsById.set(chatId, {
+      id: chatId,
+      title: `Chat ${chatId}`,
+      username: null,
+      type: inferChatTypeFromId(chatId),
+      avatar: null,
+    });
+  }
+
+  return Array.from(chatsById.values()).sort((left, right) =>
+    left.title.localeCompare(right.title, 'ru', { sensitivity: 'base' })
+  );
+}
+
+function isDialogsForbiddenForBot(error: unknown): boolean {
+  const message = (error as Error)?.message ?? '';
+  return message.includes('BOT_METHOD_INVALID') || message.includes('messages.GetDialogs');
+}
+
 async function collectTelegramChats(clientRef: TelegramClient): Promise<TelegramChatSummary[]> {
   const dialogs = await clientRef.getDialogs({ limit: 200 });
   const chats: TelegramChatSummary[] = [];
@@ -558,16 +730,15 @@ app.post('/api/settings', isAdmin, (req, res) => {
 
 app.post('/api/telegram/chats', isAdmin, async (req, res) => {
   const creds = resolveTelegramCredentials(req.body);
-  if (!creds.apiId || !creds.apiHash || !creds.botToken) {
-    return res.status(400).json({ error: 'API ID, API Hash, and Bot Token are required' });
+  if (!creds.botToken) {
+    return res.status(400).json({ error: 'Bot Token is required' });
   }
 
   const parsedApiId = parsePositiveInteger(creds.apiId);
-  if (!parsedApiId) {
-    return res.status(400).json({ error: 'API ID must be a positive integer' });
-  }
+  const hasMtprotoCreds = !!parsedApiId && !!creds.apiHash;
 
   const reuseRunningClient =
+    hasMtprotoCreds &&
     !!client &&
     isRunning &&
     creds.apiId === persistedSettings.apiId &&
@@ -575,15 +746,29 @@ app.post('/api/telegram/chats', isAdmin, async (req, res) => {
     creds.botToken === persistedSettings.botToken;
 
   try {
-    const chats = await runWithBotClient(
-      {
-        apiId: parsedApiId,
-        apiHash: creds.apiHash,
-        botToken: creds.botToken,
-      },
-      reuseRunningClient,
-      collectTelegramChats
-    );
+    let chats: TelegramChatSummary[] = [];
+
+    if (hasMtprotoCreds) {
+      try {
+        chats = await runWithBotClient(
+          {
+            apiId: parsedApiId as number,
+            apiHash: creds.apiHash,
+            botToken: creds.botToken,
+          },
+          reuseRunningClient,
+          collectTelegramChats
+        );
+      } catch (error) {
+        if (!isDialogsForbiddenForBot(error)) {
+          throw error;
+        }
+        chats = await collectTelegramChatsViaBotApi(creds.botToken, persistedSettings.targetChats);
+      }
+    } else {
+      chats = await collectTelegramChatsViaBotApi(creds.botToken, persistedSettings.targetChats);
+    }
+
     res.json({ chats });
   } catch (error) {
     res.status(500).json({ error: (error as Error).message });
