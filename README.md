@@ -44,6 +44,8 @@ Create `.env` using `.env.example`.
 - `VIEWER_PASSWORD` - password for `viewer`
 - `APP_URL` - optional app URL metadata
 
+Admin panel settings (tokens, chat list, model, threshold) are persisted on server in `.runtime/admin-settings.json`.
+
 ## Local Run
 
 ```bash

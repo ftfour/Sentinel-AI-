@@ -28,10 +28,36 @@ const SESSION_SECRET = process.env.SESSION_SECRET ?? 'change-me-in-production';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const MODEL_CACHE_DIR = path.resolve(__dirname, '.cache', 'models');
+const RUNTIME_DIR = path.resolve(__dirname, '.runtime');
+const SETTINGS_FILE = path.join(RUNTIME_DIR, 'admin-settings.json');
 type UserRole = 'admin' | 'viewer';
 type UserStore = Record<string, { password: string; role: UserRole }>;
+type PersistedAppSettings = {
+  apiId: string;
+  apiHash: string;
+  botToken: string;
+  sessionName: string;
+  targetChats: string[];
+  proxyEnabled: boolean;
+  proxyType: string;
+  proxyHost: string;
+  proxyPort: string;
+  proxyUser: string;
+  proxyPass: string;
+  downloadMedia: boolean;
+  mediaTypes: {
+    photo: boolean;
+    video: boolean;
+    document: boolean;
+    audio: boolean;
+  };
+  keywords: string[];
+  mlModel: string;
+  threatThreshold: number; // 1..99
+};
 
 fs.mkdirSync(MODEL_CACHE_DIR, { recursive: true });
+fs.mkdirSync(RUNTIME_DIR, { recursive: true });
 hfEnv.cacheDir = MODEL_CACHE_DIR;
 hfEnv.allowLocalModels = true;
 
@@ -64,7 +90,6 @@ let client: TelegramClient | null = null;
 let isRunning = false;
 let recentMessages: any[] = [];
 let threatStats = { safe: 0, toxicity: 0, threat: 0, scam: 0 };
-let targetChats: string[] = [];
 type ThreatType = 'safe' | 'toxicity' | 'threat' | 'scam';
 type RiskCategory = Exclude<ThreatType, 'safe'>;
 type RiskScores = Record<RiskCategory, number>;
@@ -137,6 +162,29 @@ const MODEL_CONFIGS: Record<string, ThreatModelConfig> = {
   },
 };
 const DEFAULT_MODEL_ID = 'local/rubert-tiny-balanced';
+const DEFAULT_PERSISTED_SETTINGS: PersistedAppSettings = {
+  apiId: '',
+  apiHash: '',
+  botToken: '',
+  sessionName: 'sentinel_session',
+  targetChats: ['-1003803680927'],
+  proxyEnabled: false,
+  proxyType: 'SOCKS5',
+  proxyHost: '127.0.0.1',
+  proxyPort: '1080',
+  proxyUser: '',
+  proxyPass: '',
+  downloadMedia: false,
+  mediaTypes: {
+    photo: true,
+    video: false,
+    document: false,
+    audio: false,
+  },
+  keywords: ['crypto', 'hack', 'buy', 'sell', 'leak'],
+  mlModel: DEFAULT_MODEL_ID,
+  threatThreshold: 75,
+};
 type TextClassifier = (text: string, options?: { top_k?: number }) => Promise<unknown>;
 const classifierCache = new Map<string, Promise<TextClassifier>>();
 const SAFE_LABEL_HINTS = ['non-toxic', 'not-toxic', 'safe', 'neutral', 'label-0'];
@@ -187,8 +235,106 @@ const CRITICAL_PATTERNS: Record<RiskCategory, Array<{ pattern: RegExp; score: nu
   ],
 };
 
-let selectedModelId = DEFAULT_MODEL_ID;
-let threatThreshold = 0.75;
+function toStringValue(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function toBooleanValue(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function toStringArray(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+  const result = value
+    .filter((item) => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  return result.length > 0 ? result : fallback;
+}
+
+function normalizeThresholdPercent(value: unknown, fallback: number): number {
+  const fallbackSafe = Math.min(99, Math.max(1, Math.round(fallback)));
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallbackSafe;
+  }
+  const normalized = value > 1 ? value / 100 : value;
+  return Math.min(99, Math.max(1, Math.round(normalized * 100)));
+}
+
+function sanitizePersistedSettings(
+  input: unknown,
+  fallback: PersistedAppSettings = DEFAULT_PERSISTED_SETTINGS
+): PersistedAppSettings {
+  const raw = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {};
+  const mediaTypesRaw =
+    typeof raw.mediaTypes === 'object' && raw.mediaTypes !== null
+      ? (raw.mediaTypes as Record<string, unknown>)
+      : {};
+
+  const mlModelCandidate = toStringValue(raw.mlModel, fallback.mlModel);
+  const mlModel = MODEL_CONFIGS[mlModelCandidate] ? mlModelCandidate : fallback.mlModel;
+
+  return {
+    apiId: toStringValue(raw.apiId, fallback.apiId),
+    apiHash: toStringValue(raw.apiHash, fallback.apiHash),
+    botToken: toStringValue(raw.botToken, fallback.botToken),
+    sessionName: toStringValue(raw.sessionName, fallback.sessionName),
+    targetChats: toStringArray(raw.targetChats, fallback.targetChats),
+    proxyEnabled: toBooleanValue(raw.proxyEnabled, fallback.proxyEnabled),
+    proxyType: toStringValue(raw.proxyType, fallback.proxyType),
+    proxyHost: toStringValue(raw.proxyHost, fallback.proxyHost),
+    proxyPort: toStringValue(raw.proxyPort, fallback.proxyPort),
+    proxyUser: toStringValue(raw.proxyUser, fallback.proxyUser),
+    proxyPass: toStringValue(raw.proxyPass, fallback.proxyPass),
+    downloadMedia: toBooleanValue(raw.downloadMedia, fallback.downloadMedia),
+    mediaTypes: {
+      photo: toBooleanValue(mediaTypesRaw.photo, fallback.mediaTypes.photo),
+      video: toBooleanValue(mediaTypesRaw.video, fallback.mediaTypes.video),
+      document: toBooleanValue(mediaTypesRaw.document, fallback.mediaTypes.document),
+      audio: toBooleanValue(mediaTypesRaw.audio, fallback.mediaTypes.audio),
+    },
+    keywords: toStringArray(raw.keywords, fallback.keywords),
+    mlModel,
+    threatThreshold: normalizeThresholdPercent(raw.threatThreshold, fallback.threatThreshold),
+  };
+}
+
+function loadPersistedSettings(): PersistedAppSettings {
+  if (!fs.existsSync(SETTINGS_FILE)) {
+    return { ...DEFAULT_PERSISTED_SETTINGS };
+  }
+
+  try {
+    const raw = fs.readFileSync(SETTINGS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return sanitizePersistedSettings(parsed, DEFAULT_PERSISTED_SETTINGS);
+  } catch (error) {
+    console.warn(`Failed to load persisted settings: ${(error as Error).message}`);
+    return { ...DEFAULT_PERSISTED_SETTINGS };
+  }
+}
+
+function savePersistedSettings(settings: PersistedAppSettings): void {
+  fs.mkdirSync(RUNTIME_DIR, { recursive: true });
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
+}
+
+function applyPersistedSettings(settings: PersistedAppSettings): void {
+  selectedModelId = settings.mlModel;
+  threatThreshold = settings.threatThreshold / 100;
+  targetChats = [...settings.targetChats];
+}
+
+let persistedSettings = loadPersistedSettings();
+let selectedModelId = persistedSettings.mlModel;
+let threatThreshold = persistedSettings.threatThreshold / 100;
+let targetChats: string[] = [...persistedSettings.targetChats];
+applyPersistedSettings(persistedSettings);
+if (!fs.existsSync(SETTINGS_FILE)) {
+  savePersistedSettings(persistedSettings);
+}
 
 // --- AUTH API ---
 app.post('/api/login', (req, res) => {
@@ -237,6 +383,18 @@ const isAdmin = (req, res, next) => {
     res.status(403).json({ error: 'Forbidden' });
   }
 };
+
+app.get('/api/settings', isAdmin, (_req, res) => {
+  res.json(persistedSettings);
+});
+
+app.post('/api/settings', isAdmin, (req, res) => {
+  const merged = sanitizePersistedSettings(req.body, persistedSettings);
+  persistedSettings = merged;
+  applyPersistedSettings(merged);
+  savePersistedSettings(merged);
+  res.json({ status: 'saved', settings: merged });
+});
 
 function emptyRiskScores(): RiskScores {
   return { toxicity: 0, threat: 0, scam: 0 };
@@ -415,24 +573,47 @@ app.post('/api/start', isAdmin, async (req, res) => {
   if (isRunning) return res.json({ status: 'already running' });
   
   const { apiId, apiHash, botToken, chats, model, threatThreshold: requestedThreshold } = req.body;
-  if (!apiId || !apiHash || !botToken) {
+  const resolvedApiId = toStringValue(apiId, persistedSettings.apiId).trim();
+  const resolvedApiHash = toStringValue(apiHash, persistedSettings.apiHash).trim();
+  const resolvedBotToken = toStringValue(botToken, persistedSettings.botToken).trim();
+  const resolvedChats = Array.isArray(chats)
+    ? toStringArray(chats, persistedSettings.targetChats)
+    : persistedSettings.targetChats;
+  const resolvedModel = typeof model === 'string' && MODEL_CONFIGS[model] ? model : persistedSettings.mlModel;
+  const resolvedThreshold =
+    requestedThreshold === undefined
+      ? persistedSettings.threatThreshold / 100
+      : normalizeThreshold(requestedThreshold);
+
+  if (!resolvedApiId || !resolvedApiHash || !resolvedBotToken) {
     return res.status(400).json({ error: 'API ID, API Hash, and Bot Token are required' });
   }
 
-  targetChats = chats || targetChats;
-  selectedModelId = typeof model === 'string' && MODEL_CONFIGS[model] ? model : DEFAULT_MODEL_ID;
-  threatThreshold = normalizeThreshold(requestedThreshold);
+  persistedSettings = sanitizePersistedSettings(
+    {
+      ...persistedSettings,
+      apiId: resolvedApiId,
+      apiHash: resolvedApiHash,
+      botToken: resolvedBotToken,
+      targetChats: resolvedChats,
+      mlModel: resolvedModel,
+      threatThreshold: Math.round(resolvedThreshold * 100),
+    },
+    persistedSettings
+  );
+  applyPersistedSettings(persistedSettings);
+  savePersistedSettings(persistedSettings);
   
   try {
     await getClassifier(selectedModelId);
 
     const stringSession = new StringSession('');
-    client = new TelegramClient(stringSession, Number(apiId), apiHash, {
+    client = new TelegramClient(stringSession, Number(resolvedApiId), resolvedApiHash, {
       connectionRetries: 5,
     });
     
     await client.start({
-      botAuthToken: botToken,
+      botAuthToken: resolvedBotToken,
     });
     
     isRunning = true;

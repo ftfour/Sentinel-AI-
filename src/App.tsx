@@ -113,6 +113,48 @@ const MODEL_OPTIONS: ModelOption[] = [
   },
 ];
 
+type SettingsState = {
+  apiId: string;
+  apiHash: string;
+  botToken: string;
+  sessionName: string;
+  targetChats: string[];
+  newChatInput: string;
+  proxyEnabled: boolean;
+  proxyType: string;
+  proxyHost: string;
+  proxyPort: string;
+  proxyUser: string;
+  proxyPass: string;
+  downloadMedia: boolean;
+  mediaTypes: { photo: boolean; video: boolean; document: boolean; audio: boolean };
+  keywords: string[];
+  newKeywordInput: string;
+  mlModel: string;
+  threatThreshold: number;
+};
+
+const DEFAULT_SETTINGS: SettingsState = {
+  apiId: '',
+  apiHash: '',
+  botToken: '',
+  sessionName: 'sentinel_session',
+  targetChats: ['-1003803680927'],
+  newChatInput: '',
+  proxyEnabled: false,
+  proxyType: 'SOCKS5',
+  proxyHost: '127.0.0.1',
+  proxyPort: '1080',
+  proxyUser: '',
+  proxyPass: '',
+  downloadMedia: false,
+  mediaTypes: { photo: true, video: false, document: false, audio: false },
+  keywords: ['crypto', 'hack', 'buy', 'sell', 'leak'],
+  newKeywordInput: '',
+  mlModel: MODEL_OPTIONS[0].id,
+  threatThreshold: 75,
+};
+
 // --- MAIN APP COMPONENT ---
 function SentinelApp() {
   const { user, logout } = useAuth();
@@ -124,26 +166,8 @@ function SentinelApp() {
   const [stats, setStats] = useState<{ safe: number; toxicity: number; threat: number; scam: number }>({ safe: 0, toxicity: 0, threat: 0, scam: 0 });
   
   // Settings State
-  const [settings, setSettings] = useState({
-    apiId: '1234567',
-    apiHash: 'a1b2c3d4e5f6g7h8i9j0',
-    botToken: '',
-    sessionName: 'sentinel_session',
-    targetChats: ['-1003803680927'],
-    newChatInput: '',
-    proxyEnabled: false,
-    proxyType: 'SOCKS5',
-    proxyHost: '127.0.0.1',
-    proxyPort: '1080',
-    proxyUser: '',
-    proxyPass: '',
-    downloadMedia: false,
-    mediaTypes: { photo: true, video: false, document: false, audio: false },
-    keywords: ['crypto', 'hack', 'buy', 'sell', 'leak'],
-    newKeywordInput: '',
-    mlModel: MODEL_OPTIONS[0].id,
-    threatThreshold: 75,
-  });
+  const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const selectedModel = MODEL_OPTIONS.find((model) => model.id === settings.mlModel) ?? MODEL_OPTIONS[0];
 
   // --- DATA FETCHING ---
@@ -180,13 +204,117 @@ function SentinelApp() {
     return () => clearInterval(interval);
   }, [logout]);
 
+  const toPersistedSettingsPayload = (source: SettingsState) => ({
+    apiId: source.apiId,
+    apiHash: source.apiHash,
+    botToken: source.botToken,
+    sessionName: source.sessionName,
+    targetChats: source.targetChats,
+    proxyEnabled: source.proxyEnabled,
+    proxyType: source.proxyType,
+    proxyHost: source.proxyHost,
+    proxyPort: source.proxyPort,
+    proxyUser: source.proxyUser,
+    proxyPass: source.proxyPass,
+    downloadMedia: source.downloadMedia,
+    mediaTypes: source.mediaTypes,
+    keywords: source.keywords,
+    mlModel: source.mlModel,
+    threatThreshold: source.threatThreshold,
+  });
+
+  useEffect(() => {
+    if (!user || user.role !== 'admin') return;
+    let cancelled = false;
+
+    const loadSettings = async () => {
+      try {
+        const res = await fetch('/api/settings');
+        if (!res.ok) return;
+
+        const saved = await res.json();
+        if (cancelled) return;
+
+        setSettings((prev) => ({
+          ...prev,
+          ...saved,
+          targetChats: Array.isArray(saved?.targetChats) ? saved.targetChats : prev.targetChats,
+          keywords: Array.isArray(saved?.keywords) ? saved.keywords : prev.keywords,
+          mediaTypes: {
+            ...prev.mediaTypes,
+            ...(saved?.mediaTypes ?? {}),
+          },
+          newChatInput: '',
+          newKeywordInput: '',
+        }));
+      } catch (err) {
+        console.error('Failed to load saved settings', err);
+      }
+    };
+
+    loadSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  const saveSettings = async (showNotification = true): Promise<boolean> => {
+    if (!user || user.role !== 'admin') return false;
+    setIsSavingSettings(true);
+
+    try {
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(toPersistedSettingsPayload(settings)),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (showNotification) {
+          alert(data.error ?? 'Не удалось сохранить конфигурацию');
+        }
+        return false;
+      }
+
+      if (data?.settings) {
+        setSettings((prev) => ({
+          ...prev,
+          ...data.settings,
+          newChatInput: '',
+          newKeywordInput: '',
+        }));
+      }
+
+      if (showNotification) {
+        alert('Конфигурация сохранена');
+      }
+
+      return true;
+    } catch (err) {
+      console.error('Failed to save settings', err);
+      if (showNotification) {
+        alert('Ошибка сети при сохранении конфигурации');
+      }
+      return false;
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
+
   const toggleEngine = async () => {
-    if (user.role !== 'admin') return;
+    if (!user || user.role !== 'admin') return;
     try {
       if (isRunning) {
         await fetch('/api/stop', { method: 'POST' });
         setIsRunning(false);
       } else {
+        const saved = await saveSettings(false);
+        if (!saved) {
+          alert('Сначала сохраните настройки и попробуйте снова');
+          return;
+        }
+
         const res = await fetch('/api/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -672,9 +800,18 @@ function SentinelApp() {
 
         {/* Save Button */}
         <div className="flex justify-end pt-4">
-          <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors flex items-center shadow-lg shadow-indigo-500/20">
+          <button
+            onClick={() => void saveSettings(true)}
+            disabled={isSavingSettings}
+            className={cn(
+              "text-white px-6 py-2.5 rounded-lg font-medium transition-colors flex items-center shadow-lg shadow-indigo-500/20",
+              isSavingSettings
+                ? "bg-indigo-800 cursor-not-allowed opacity-80"
+                : "bg-indigo-600 hover:bg-indigo-700"
+            )}
+          >
             <Save className="w-4 h-4 mr-2" />
-            Сохранить конфигурацию
+            {isSavingSettings ? 'Сохранение...' : 'Сохранить конфигурацию'}
           </button>
         </div>
       </div>
