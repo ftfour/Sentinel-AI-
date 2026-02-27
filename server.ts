@@ -1735,7 +1735,7 @@ function isGoogleSmtpHost(value: string): boolean {
 
 function createSmtpTransport(
   config: Pick<AlertNotificationConfig, 'smtpHost' | 'smtpPort' | 'smtpSecure' | 'smtpUser' | 'smtpPass'>,
-  options?: { connectHost?: string }
+  options?: { connectHost?: string; secureOverride?: boolean }
 ): Transporter {
   const auth =
     config.smtpUser.length > 0
@@ -1745,13 +1745,14 @@ function createSmtpTransport(
         }
       : undefined;
   const connectHost = options?.connectHost?.trim();
+  const secureValue = typeof options?.secureOverride === 'boolean' ? options.secureOverride : config.smtpSecure;
   const hostForConnection = connectHost && connectHost.length > 0 ? connectHost : config.smtpHost;
   const googleSmtp = isGoogleSmtpHost(config.smtpHost);
   const tlsServername = !net.isIP(config.smtpHost) ? config.smtpHost : undefined;
   return nodemailer.createTransport({
     host: hostForConnection,
     port: config.smtpPort,
-    secure: config.smtpSecure,
+    secure: secureValue,
     auth,
     connectionTimeout: 15_000,
     greetingTimeout: 12_000,
@@ -1779,6 +1780,18 @@ function isSmtpNetworkUnreachable(error: unknown): boolean {
   );
 }
 
+function isSmtpTlsModeMismatch(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return (
+    message.includes('wrong version number') ||
+    message.includes('tls_validate_record_header') ||
+    message.includes('ssl3_get_record')
+  );
+}
+
 async function resolveIpv4Host(host: string): Promise<string | null> {
   const normalized = host.trim();
   if (!normalized) {
@@ -1799,31 +1812,74 @@ async function resolveIpv4Host(host: string): Promise<string | null> {
   }
 }
 
+type SmtpTransportAttempt = {
+  connectHost?: string;
+  secure: boolean;
+};
+
+async function buildSmtpFallbackAttempts(
+  config: Pick<AlertNotificationConfig, 'smtpHost' | 'smtpPort' | 'smtpSecure' | 'smtpUser' | 'smtpPass'>,
+  initialError: unknown
+): Promise<SmtpTransportAttempt[]> {
+  const attempts: SmtpTransportAttempt[] = [];
+  const shouldTryIpv4 = isSmtpNetworkUnreachable(initialError) || isSmtpTlsModeMismatch(initialError);
+  const shouldToggleSecure = isSmtpTlsModeMismatch(initialError);
+  const ipv4Host = shouldTryIpv4 ? await resolveIpv4Host(config.smtpHost) : null;
+
+  if (shouldToggleSecure) {
+    attempts.push({ secure: !config.smtpSecure });
+  }
+  if (ipv4Host) {
+    attempts.push({ connectHost: ipv4Host, secure: config.smtpSecure });
+    if (shouldToggleSecure) {
+      attempts.push({ connectHost: ipv4Host, secure: !config.smtpSecure });
+    }
+  }
+
+  const unique = new Map<string, SmtpTransportAttempt>();
+  for (const attempt of attempts) {
+    const key = `${attempt.secure ? 's' : 'p'}|${attempt.connectHost ?? 'host'}`;
+    if (!unique.has(key)) {
+      unique.set(key, attempt);
+    }
+  }
+  return Array.from(unique.values());
+}
+
 async function verifySmtpWithFallback(
   config: Pick<AlertNotificationConfig, 'smtpHost' | 'smtpPort' | 'smtpSecure' | 'smtpUser' | 'smtpPass'>
-): Promise<{ transporter: Transporter; usedIpv4Fallback: boolean }> {
+): Promise<{ transporter: Transporter; usedIpv4Fallback: boolean; usedSecureFallback: boolean }> {
   const transporter = createSmtpTransport(config);
   try {
     await transporter.verify();
-    return { transporter, usedIpv4Fallback: false };
+    return { transporter, usedIpv4Fallback: false, usedSecureFallback: false };
   } catch (error) {
-    if (!isSmtpNetworkUnreachable(error)) {
-      throw error;
+    const attempts = await buildSmtpFallbackAttempts(config, error);
+    let lastError: unknown = error;
+    for (const attempt of attempts) {
+      try {
+        const fallbackTransporter = createSmtpTransport(config, {
+          connectHost: attempt.connectHost,
+          secureOverride: attempt.secure,
+        });
+        await fallbackTransporter.verify();
+        return {
+          transporter: fallbackTransporter,
+          usedIpv4Fallback: Boolean(attempt.connectHost),
+          usedSecureFallback: attempt.secure !== config.smtpSecure,
+        };
+      } catch (attemptError) {
+        lastError = attemptError;
+      }
     }
-    const ipv4Host = await resolveIpv4Host(config.smtpHost);
-    if (!ipv4Host) {
-      throw error;
-    }
-    const fallbackTransporter = createSmtpTransport(config, { connectHost: ipv4Host });
-    await fallbackTransporter.verify();
-    return { transporter: fallbackTransporter, usedIpv4Fallback: true };
+    throw lastError;
   }
 }
 
 async function sendMailWithFallback(
   config: Pick<AlertNotificationConfig, 'smtpHost' | 'smtpPort' | 'smtpSecure' | 'smtpUser' | 'smtpPass'>,
   mailOptions: any
-): Promise<{ info: any; usedIpv4Fallback: boolean }> {
+): Promise<{ info: any; usedIpv4Fallback: boolean; usedSecureFallback: boolean }> {
   const transporter = getAlertTransporter({
     smtpHost: config.smtpHost,
     smtpPort: config.smtpPort,
@@ -1837,18 +1893,27 @@ async function sendMailWithFallback(
   });
   try {
     const info = await transporter.sendMail(mailOptions);
-    return { info, usedIpv4Fallback: false };
+    return { info, usedIpv4Fallback: false, usedSecureFallback: false };
   } catch (error) {
-    if (!isSmtpNetworkUnreachable(error)) {
-      throw error;
+    const attempts = await buildSmtpFallbackAttempts(config, error);
+    let lastError: unknown = error;
+    for (const attempt of attempts) {
+      try {
+        const fallbackTransporter = createSmtpTransport(config, {
+          connectHost: attempt.connectHost,
+          secureOverride: attempt.secure,
+        });
+        const info = await fallbackTransporter.sendMail(mailOptions);
+        return {
+          info,
+          usedIpv4Fallback: Boolean(attempt.connectHost),
+          usedSecureFallback: attempt.secure !== config.smtpSecure,
+        };
+      } catch (attemptError) {
+        lastError = attemptError;
+      }
     }
-    const ipv4Host = await resolveIpv4Host(config.smtpHost);
-    if (!ipv4Host) {
-      throw error;
-    }
-    const fallbackTransporter = createSmtpTransport(config, { connectHost: ipv4Host });
-    const info = await fallbackTransporter.sendMail(mailOptions);
-    return { info, usedIpv4Fallback: true };
+    throw lastError;
   }
 }
 
@@ -2006,6 +2071,9 @@ async function runSmtpDiagnostics(
       if (verified.usedIpv4Fallback) {
         addCheck('smtp-network', 'warn', 'IPv6 route is unavailable; SMTP switched to IPv4 fallback.');
       }
+      if (verified.usedSecureFallback) {
+        addCheck('smtp-tls-mode', 'warn', 'SMTP TLS mode was auto-corrected (secure on/off mismatch).');
+      }
     } catch (error) {
       verification.success = false;
       verification.latencyMs = Date.now() - startedAt;
@@ -2033,7 +2101,7 @@ async function runSmtpDiagnostics(
       addCheck('smtp-test-send', 'error', testEmail.error);
     } else {
       try {
-        const { info, usedIpv4Fallback } = await sendMailWithFallback(
+        const { info, usedIpv4Fallback, usedSecureFallback } = await sendMailWithFallback(
           {
             smtpHost,
             smtpPort,
@@ -2058,6 +2126,9 @@ async function runSmtpDiagnostics(
         addCheck('smtp-test-send', 'ok', `Test email sent to ${diagnosticRecipient}.`);
         if (usedIpv4Fallback) {
           addCheck('smtp-network', 'warn', 'Test email used IPv4 fallback due missing IPv6 route.');
+        }
+        if (usedSecureFallback) {
+          addCheck('smtp-tls-mode', 'warn', 'Test email used auto-corrected TLS mode (secure on/off mismatch).');
         }
       } catch (error) {
         testEmail.error = toSmtpDiagnosticErrorMessage(error);
@@ -2992,7 +3063,7 @@ app.post('/api/reports/email', isAdmin, RL_REPORT_EMAIL, async (req, res) => {
   }
 
   try {
-    const { info, usedIpv4Fallback } = await sendMailWithFallback(
+    const { info, usedIpv4Fallback, usedSecureFallback } = await sendMailWithFallback(
       {
       smtpHost,
       smtpPort,
@@ -3015,9 +3086,14 @@ app.post('/api/reports/email', isAdmin, RL_REPORT_EMAIL, async (req, res) => {
       recipients: recipients.length,
       from: fallbackFrom,
       usedIpv4Fallback,
+      usedSecureFallback,
     });
   } catch (error) {
-    res.status(500).json({ error: `Failed to send report email: ${toSmtpDiagnosticErrorMessage(error)}` });
+    const diagnosticError = toSmtpDiagnosticErrorMessage(error);
+    const modeHint = isSmtpTlsModeMismatch(error)
+      ? ' Hint: for port 587 use secure=false (STARTTLS), for port 465 use secure=true (SSL/TLS).'
+      : '';
+    res.status(500).json({ error: `Failed to send report email: ${diagnosticError}${modeHint}` });
   }
 });
 
