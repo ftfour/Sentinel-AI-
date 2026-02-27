@@ -853,29 +853,29 @@ function PublicThreatBoard() {
     }
 
     try {
-      const [dangerRes, statsRes] = await Promise.all([
-        fetch('/api/public/dangers?limit=1000'),
+      const [messagesRes, statsRes] = await Promise.all([
+        fetch('/api/public/messages?limit=1000'),
         fetch('/api/public/stats'),
       ]);
 
-      if (!dangerRes.ok) {
-        throw new Error(`Danger feed is unavailable (${dangerRes.status})`);
+      if (!messagesRes.ok) {
+        throw new Error(`Message feed is unavailable (${messagesRes.status})`);
       }
       if (!statsRes.ok) {
         throw new Error(`Stats feed is unavailable (${statsRes.status})`);
       }
 
-      const dangerPayload = await dangerRes.json();
+      const messagesPayload = await messagesRes.json();
       const statsPayload = await statsRes.json();
 
-      const rawItems = Array.isArray(dangerPayload)
-        ? dangerPayload
-        : Array.isArray(dangerPayload?.items)
-          ? dangerPayload.items
+      const rawItems = Array.isArray(messagesPayload)
+        ? messagesPayload
+        : Array.isArray(messagesPayload?.items)
+          ? messagesPayload.items
           : [];
-      const parsedItems = rawItems
-        .map((item: any, index: number) => parseFeedMessage(item, Date.now() + index))
-        .filter((item: FeedMessage) => item.type !== 'safe');
+      const parsedItems = rawItems.map((item: any, index: number) =>
+        parseFeedMessage(item, Date.now() + index)
+      );
 
       setDangerMessages(parsedItems);
       setStats({
@@ -891,8 +891,8 @@ function PublicThreatBoard() {
       const updatedAtRaw =
         typeof statsPayload?.updatedAt === 'string'
           ? statsPayload.updatedAt
-          : typeof dangerPayload?.updatedAt === 'string'
-            ? dangerPayload.updatedAt
+          : typeof messagesPayload?.updatedAt === 'string'
+            ? messagesPayload.updatedAt
             : '';
       setLastUpdated(
         updatedAtRaw
@@ -920,13 +920,10 @@ function PublicThreatBoard() {
   }, []);
 
   const explicitThreats = dangerMessages.filter((message) => message.type === 'threat');
-  const sortedDangerMessages = [...dangerMessages].sort((left, right) => {
-    if (right.score !== left.score) {
-      return right.score - left.score;
-    }
-    return right.id - left.id;
-  });
-  const rankedCategories = (['threat', 'scam', 'toxicity', 'recruitment', 'drugs', 'terrorism'] as ThreatLabel[])
+  const safeMessages = dangerMessages.filter((message) => message.type === 'safe');
+  const nonSafeMessages = dangerMessages.filter((message) => message.type !== 'safe');
+  const sortedAllMessages = [...dangerMessages].sort((left, right) => right.id - left.id);
+  const rankedCategories = (['safe', 'threat', 'scam', 'toxicity', 'recruitment', 'drugs', 'terrorism'] as ThreatLabel[])
     .map((type) => ({ type, value: numberOrFallback(stats[type], 0) }))
     .sort((left, right) => right.value - left.value);
   const dominantCategory = rankedCategories[0] ?? { type: 'safe' as ThreatLabel, value: 0 };
@@ -961,7 +958,9 @@ function PublicThreatBoard() {
             <div
               className={cn(
                 'h-full rounded-full',
-                message.type === 'threat' || message.type === 'terrorism'
+                message.type === 'safe'
+                  ? 'bg-emerald-500/90'
+                  : message.type === 'threat' || message.type === 'terrorism'
                   ? 'bg-red-500/90'
                   : message.type === 'toxicity'
                     ? 'bg-amber-500/90'
@@ -969,7 +968,9 @@ function PublicThreatBoard() {
                       ? 'bg-violet-500/90'
                       : message.type === 'recruitment'
                         ? 'bg-sky-500/90'
-                        : 'bg-yellow-500/90'
+                        : message.type === 'drugs'
+                          ? 'bg-yellow-500/90'
+                          : 'bg-slate-400/90'
               )}
               style={{ width: `${barWidth}%` }}
             />
@@ -994,7 +995,7 @@ function PublicThreatBoard() {
                 Мониторинг опасных сообщений без авторизации
               </h1>
               <p className="text-slate-400 max-w-3xl">
-                Этот экран открыт по ссылке и показывает текущие опасные сообщения из потока. Для администрирования,
+                Этот экран открыт по ссылке и показывает все входящие сообщения из потока, включая безопасные. Для администрирования,
                 настройки агентов и управления движком используйте вход администратора.
               </p>
             </div>
@@ -1046,17 +1047,17 @@ function PublicThreatBoard() {
 
         <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
           <div className="rounded-xl border border-slate-800 bg-[#111318] p-5">
-            <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Всего опасных сообщений</div>
+            <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Всего сообщений</div>
             <div className="text-3xl font-light text-slate-100">{dangerMessages.length}</div>
           </div>
           <div className="rounded-xl border border-slate-800 bg-[#111318] p-5">
-            <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Явные угрозы (threat)</div>
-            <div className="text-3xl font-light text-red-300">{explicitThreats.length}</div>
+            <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Безопасные сообщения</div>
+            <div className="text-3xl font-light text-emerald-300">{safeMessages.length}</div>
           </div>
           <div className="rounded-xl border border-slate-800 bg-[#111318] p-5">
-            <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Доминирующая категория</div>
-            <div className="text-lg font-medium text-slate-100">{THREAT_LABELS[dominantCategory.type]}</div>
-            <div className="text-xs text-slate-400 mt-1">Сообщений: {dominantCategory.value}</div>
+            <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Опасные сообщения</div>
+            <div className="text-3xl font-light text-amber-300">{nonSafeMessages.length}</div>
+            <div className="text-xs text-slate-400 mt-1">Явные угрозы: {explicitThreats.length}</div>
           </div>
           <div className="rounded-xl border border-slate-800 bg-[#111318] p-5">
             <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Последнее обновление</div>
@@ -1109,17 +1110,17 @@ function PublicThreatBoard() {
             <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/20 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-200 flex items-center">
                 <MessageSquare className="w-4 h-4 mr-2 text-amber-400" />
-                Все опасные сообщения
+                Все сообщения (включая safe)
               </h3>
-              <span className="text-xs font-mono text-amber-300">{sortedDangerMessages.length}</span>
+              <span className="text-xs font-mono text-amber-300">{sortedAllMessages.length}</span>
             </div>
             <div className="p-4 space-y-3 max-h-[620px] overflow-y-auto custom-scrollbar">
               {isLoading ? (
                 <div className="text-sm text-slate-500 py-10 text-center">Загрузка данных...</div>
-              ) : sortedDangerMessages.length === 0 ? (
-                <div className="text-sm text-slate-500 py-10 text-center">Опасные сообщения пока отсутствуют</div>
+              ) : sortedAllMessages.length === 0 ? (
+                <div className="text-sm text-slate-500 py-10 text-center">Сообщения пока отсутствуют</div>
               ) : (
-                sortedDangerMessages.map(renderDangerItem)
+                sortedAllMessages.map(renderDangerItem)
               )}
             </div>
           </div>

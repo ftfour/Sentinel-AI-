@@ -2921,6 +2921,12 @@ const RL_PUBLIC_DANGERS = withRateLimit('public_dangers', {
   cooldownMs: 10 * 1000,
   error: 'Public danger feed polling is too frequent.',
 });
+const RL_PUBLIC_MESSAGES = withRateLimit('public_messages', {
+  windowMs: 60 * 1000,
+  max: 240,
+  cooldownMs: 10 * 1000,
+  error: 'Public message feed polling is too frequent.',
+});
 const RL_DB_STATUS = withRateLimit('db_status', {
   windowMs: 60 * 1000,
   max: 60,
@@ -4209,6 +4215,17 @@ app.get('/api/public/dangers', RL_PUBLIC_DANGERS, (req, res) => {
   const limitRaw = Number(req.query?.limit ?? MAX_RECENT_MESSAGES);
   const limit = Number.isFinite(limitRaw) ? Math.floor(limitRaw) : MAX_RECENT_MESSAGES;
   const items = readDangerMessages(limit);
+  res.json({
+    items,
+    total: items.length,
+    updatedAt: new Date().toISOString(),
+  });
+});
+
+app.get('/api/public/messages', RL_PUBLIC_MESSAGES, (req, res) => {
+  const limitRaw = Number(req.query?.limit ?? MAX_RECENT_MESSAGES);
+  const limit = Number.isFinite(limitRaw) ? Math.floor(limitRaw) : MAX_RECENT_MESSAGES;
+  const items = readRecentMessages(limit);
   res.json({
     items,
     total: items.length,
