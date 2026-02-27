@@ -534,7 +534,21 @@ type SmtpDiagnosticsResult = {
     error: string | null;
   };
 };
-type ActiveTab = 'dashboard' | 'dangers' | 'database' | 'agents' | 'points' | 'engine' | 'engineTest' | 'mail' | 'proxy' | 'logs';
+type ActiveTab =
+  | 'dashboard'
+  | 'dangers'
+  | 'database'
+  | 'agents'
+  | 'points'
+  | 'reportPrep'
+  | 'engine'
+  | 'engineTest'
+  | 'mail'
+  | 'proxy'
+  | 'logs';
+type ReportPriority = 'monitor' | 'high' | 'critical';
+
+const PRIVATE_MESSAGES_PAGE_SIZE = 15;
 
 const DEFAULT_SETTINGS: SettingsState = {
   apiId: '',
@@ -724,6 +738,11 @@ function SentinelApp() {
   const [isScanningPrivateChat, setIsScanningPrivateChat] = useState(false);
   const [privateScanLimit, setPrivateScanLimit] = useState(80);
   const [privateChatSearch, setPrivateChatSearch] = useState('');
+  const [privateMessagesPage, setPrivateMessagesPage] = useState(1);
+  const [selectedReportMessageId, setSelectedReportMessageId] = useState('');
+  const [reportPriority, setReportPriority] = useState<ReportPriority>('high');
+  const [reportAnalyst, setReportAnalyst] = useState('Дежурный аналитик');
+  const [reportComment, setReportComment] = useState('');
   
   // Settings State
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
@@ -767,6 +786,12 @@ function SentinelApp() {
       ? 'Пользовательские сообщения'
       : (ENGINE_SELF_TEST_PRESET_OPTIONS.find((preset) => preset.id === engineTestUsedPreset)?.label ?? 'Неизвестно');
   const availableChats = availableChatsByMode[settings.authMode];
+  const isMessageSuspicious = (message: PrivateRamMessage): boolean => {
+    if (message.threatType !== 'safe') {
+      return true;
+    }
+    return ENGINE_RISK_KEYS.some((riskKey) => message.scores[riskKey] >= message.thresholds[riskKey]);
+  };
   // --- DATA FETCHING ---
   const applyStatsPayload = (statsData: any) => {
     setStats((prev) => ({
@@ -898,6 +923,7 @@ function SentinelApp() {
       setPrivateRamMessages([]);
       setPrivateRamReport(null);
       setSelectedPrivateMessageId('');
+      setPrivateMessagesPage(1);
       return;
     }
     const hasRamData = privateRamChats.some((chat) => chat.chatId === selectedPrivateChatId);
@@ -928,6 +954,42 @@ function SentinelApp() {
       setSelectedPrivateMessageId(privateRamMessages[0].id);
     }
   }, [privateRamMessages, selectedPrivateMessageId]);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(privateRamMessages.length / PRIVATE_MESSAGES_PAGE_SIZE));
+    if (privateMessagesPage > totalPages) {
+      setPrivateMessagesPage(totalPages);
+      return;
+    }
+    if (privateMessagesPage < 1) {
+      setPrivateMessagesPage(1);
+    }
+  }, [privateRamMessages.length, privateMessagesPage]);
+
+  useEffect(() => {
+    if (!selectedPrivateMessageId || privateRamMessages.length === 0) {
+      return;
+    }
+    const selectedIndex = privateRamMessages.findIndex((message) => message.id === selectedPrivateMessageId);
+    if (selectedIndex < 0) {
+      return;
+    }
+    const requiredPage = Math.floor(selectedIndex / PRIVATE_MESSAGES_PAGE_SIZE) + 1;
+    setPrivateMessagesPage((prev) => (prev === requiredPage ? prev : requiredPage));
+  }, [privateRamMessages, selectedPrivateMessageId]);
+
+  useEffect(() => {
+    const candidates = privateRamMessages.filter((message) => isMessageSuspicious(message));
+    if (candidates.length === 0) {
+      if (selectedReportMessageId) {
+        setSelectedReportMessageId('');
+      }
+      return;
+    }
+    if (!candidates.some((message) => message.id === selectedReportMessageId)) {
+      setSelectedReportMessageId(candidates[0].id);
+    }
+  }, [privateRamMessages, selectedReportMessageId]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1286,6 +1348,7 @@ function SentinelApp() {
       setPrivateRamMessages(messages);
       setPrivateRamReport(payload?.report ?? null);
       setSelectedPrivateMessageId(messages[0]?.id ?? '');
+      setPrivateMessagesPage(1);
     } catch (err) {
       console.error('Failed to load RAM chat messages', err);
     }
@@ -1350,6 +1413,7 @@ function SentinelApp() {
       setPrivateRamMessages(messages);
       setPrivateRamReport(payload?.report ?? null);
       setSelectedPrivateMessageId(messages[0]?.id ?? '');
+      setPrivateMessagesPage(1);
       await refreshPrivateRamChats(false);
     } catch (err) {
       console.error('Failed to scan private chat', err);
@@ -1964,6 +2028,80 @@ function SentinelApp() {
     telegramClientChats.find((chat) => chat.id === selectedPrivateChatId) ?? null;
   const selectedPrivateMessage =
     privateRamMessages.find((message) => message.id === selectedPrivateMessageId) ?? null;
+  const privateMessagesTotalPages = Math.max(1, Math.ceil(privateRamMessages.length / PRIVATE_MESSAGES_PAGE_SIZE));
+  const privateMessagesPageStart = (privateMessagesPage - 1) * PRIVATE_MESSAGES_PAGE_SIZE;
+  const privateMessagesPageItems = privateRamMessages.slice(
+    privateMessagesPageStart,
+    privateMessagesPageStart + PRIVATE_MESSAGES_PAGE_SIZE
+  );
+  const privateMessagesRangeStart = privateRamMessages.length === 0 ? 0 : privateMessagesPageStart + 1;
+  const privateMessagesRangeEnd = Math.min(
+    privateRamMessages.length,
+    privateMessagesPageStart + privateMessagesPageItems.length
+  );
+  const reportCandidateMessages = privateRamMessages
+    .filter((message) => isMessageSuspicious(message))
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      return right.messageTs - left.messageTs;
+    });
+  const selectedReportMessage =
+    reportCandidateMessages.find((message) => message.id === selectedReportMessageId) ?? null;
+  const selectedReportExceededRisks = selectedReportMessage
+    ? ENGINE_RISK_KEYS.filter((riskKey) => selectedReportMessage.scores[riskKey] >= selectedReportMessage.thresholds[riskKey]).sort(
+        (left, right) => selectedReportMessage.scores[right] - selectedReportMessage.scores[left]
+      )
+    : [];
+  const selectedReportPrimaryRisk =
+    selectedReportExceededRisks[0] ??
+    (selectedReportMessage ? selectedReportMessage.threatType : 'safe');
+  const reportPriorityMeta: Record<ReportPriority, { label: string; badge: string }> = {
+    monitor: { label: 'Мониторинг', badge: 'text-sky-300 bg-sky-500/10 border-sky-500/30' },
+    high: { label: 'Повышенный', badge: 'text-amber-300 bg-amber-500/10 border-amber-500/30' },
+    critical: { label: 'Критический', badge: 'text-red-300 bg-red-500/10 border-red-500/30' },
+  };
+  const reportDraftText = selectedReportMessage
+    ? [
+        'Оперативный черновик отчета',
+        `Приоритет: ${reportPriorityMeta[reportPriority].label}`,
+        `Категория: ${THREAT_LABELS[selectedReportPrimaryRisk]} (${Math.round(selectedReportMessage.score * 100)}%)`,
+        `Чат: ${selectedReportMessage.chat} (${selectedReportMessage.chatId})`,
+        `Отправитель: ${selectedReportMessage.sender}`,
+        `Время: ${selectedReportMessage.time}`,
+        selectedReportExceededRisks.length > 0
+          ? `Превышенные пороги: ${selectedReportExceededRisks
+              .map((riskKey) => `${THREAT_LABELS[riskKey]} ${selectedReportMessage.scores[riskKey]}%`)
+              .join(', ')}`
+          : 'Превышенные пороги: не зафиксированы, но сообщение отмечено как подозрительное.',
+        '',
+        'Текст сообщения:',
+        selectedReportMessage.text,
+        '',
+        'Комментарий аналитика:',
+        reportComment.trim().length > 0 ? reportComment.trim() : 'Без комментария',
+        '',
+        `Ответственный: ${reportAnalyst.trim() || 'Не указан'}`,
+      ].join('\n')
+    : '';
+  const openReportPreparation = (messageId: string) => {
+    setSelectedPrivateMessageId(messageId);
+    setSelectedReportMessageId(messageId);
+    setActiveTab('reportPrep');
+  };
+  const copyReportDraft = async (): Promise<void> => {
+    if (!reportDraftText) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(reportDraftText);
+      alert('Черновик отчета скопирован в буфер обмена');
+    } catch (err) {
+      console.error('Failed to copy report draft', err);
+      alert('Не удалось скопировать черновик отчета');
+    }
+  };
 
   // --- RENDERERS ---
   const renderDashboard = () => {
@@ -2492,6 +2630,7 @@ function SentinelApp() {
                               setSelectedPrivateMessageId('');
                               setPrivateRamMessages([]);
                               setPrivateRamReport(null);
+                              setPrivateMessagesPage(1);
                             }}
                             className={cn(
                               "w-full text-left p-2 rounded-md border transition-colors",
@@ -2589,12 +2728,50 @@ function SentinelApp() {
               )}
 
               <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
-                <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">Сообщения чата (клик для отчета)</div>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="text-xs text-slate-500 uppercase tracking-wider">Сообщения чата (клик для отчета)</div>
+                  {privateRamMessages.length > 0 && (
+                    <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                      <span>
+                        {privateMessagesRangeStart}-{privateMessagesRangeEnd} из {privateRamMessages.length}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPrivateMessagesPage((prev) => Math.max(1, prev - 1))}
+                        disabled={privateMessagesPage <= 1}
+                        className={cn(
+                          "px-2 py-1 rounded border transition-colors",
+                          privateMessagesPage <= 1
+                            ? "border-slate-700 text-slate-600 cursor-not-allowed"
+                            : "border-slate-600 text-slate-300 hover:bg-slate-800"
+                        )}
+                      >
+                        Назад
+                      </button>
+                      <span className="min-w-[68px] text-center">
+                        {privateMessagesPage}/{privateMessagesTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPrivateMessagesPage((prev) => Math.min(privateMessagesTotalPages, prev + 1))}
+                        disabled={privateMessagesPage >= privateMessagesTotalPages}
+                        className={cn(
+                          "px-2 py-1 rounded border transition-colors",
+                          privateMessagesPage >= privateMessagesTotalPages
+                            ? "border-slate-700 text-slate-600 cursor-not-allowed"
+                            : "border-slate-600 text-slate-300 hover:bg-slate-800"
+                        )}
+                      >
+                        Вперед
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <div className="max-h-[420px] overflow-y-auto custom-scrollbar space-y-2 pr-1">
                   {privateRamMessages.length === 0 ? (
                     <div className="text-slate-500 text-xs py-4 text-center">Выберите чат и запустите проверку.</div>
                   ) : (
-                    privateRamMessages.map((message) => {
+                    privateMessagesPageItems.map((message) => {
                       const selected = message.id === selectedPrivateMessageId;
                       return (
                         <button
@@ -2626,8 +2803,19 @@ function SentinelApp() {
                 <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-slate-200">Отчет проверки сообщения</div>
-                    <div className="text-xs text-slate-400">
-                      {THREAT_LABELS[selectedPrivateMessage.threatType]} • {Math.round(selectedPrivateMessage.score * 100)}%
+                    <div className="flex items-center gap-3">
+                      <div className="text-xs text-slate-400">
+                        {THREAT_LABELS[selectedPrivateMessage.threatType]} • {Math.round(selectedPrivateMessage.score * 100)}%
+                      </div>
+                      {isMessageSuspicious(selectedPrivateMessage) && (
+                        <button
+                          type="button"
+                          onClick={() => openReportPreparation(selectedPrivateMessage.id)}
+                          className="px-2.5 py-1 rounded border border-indigo-500/30 text-indigo-300 text-[11px] hover:bg-indigo-500/10 transition-colors"
+                        >
+                          В подготовку отчета
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="text-xs text-slate-400">
@@ -2661,6 +2849,229 @@ function SentinelApp() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderReportPreparation = () => {
+    if (user.role !== 'admin') {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-4">
+          <FileText className="w-12 h-12 opacity-20" />
+          <p className="font-mono text-sm">Доступно только для администратора.</p>
+        </div>
+      );
+    }
+
+    if (settings.authMode !== 'user') {
+      return (
+        <div className="max-w-4xl mx-auto">
+          <div className="bg-[#111113] border border-slate-800 rounded-xl p-6 text-slate-300">
+            <h3 className="text-base font-semibold text-slate-100 mb-2">Подготовка отчета</h3>
+            <p className="text-sm text-slate-400">
+              Для подготовки отчетов включите режим <span className="text-slate-200">Telegram Account Session</span> во вкладке
+              <span className="text-slate-200"> Агенты</span>, затем выполните анализ чата в режиме очков.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6 animate-in fade-in duration-300 max-w-6xl mx-auto pb-12">
+        <div className="relative overflow-hidden rounded-xl border border-indigo-500/20 bg-[#111113]">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.18),transparent_55%)] pointer-events-none" />
+          <div className="relative px-6 py-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <div className="text-xs uppercase tracking-[0.16em] text-indigo-300/80">Оперативный модуль</div>
+              <h3 className="text-lg font-semibold text-slate-100 mt-1">Подготовка отчета по подозрительным сообщениям</h3>
+              <p className="text-sm text-slate-400 mt-1">
+                Формируйте готовый черновик с категорией риска, порогами и данными сообщения для передачи в работу.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <div className="rounded-lg border border-slate-700 bg-[#0A0A0B] px-3 py-2 text-slate-300">
+                Кандидатов: <span className="text-slate-100">{reportCandidateMessages.length}</span>
+              </div>
+              <div className="rounded-lg border border-slate-700 bg-[#0A0A0B] px-3 py-2 text-slate-300">
+                Выбран чат: <span className="text-slate-100">{selectedTelegramClientChat?.title ?? '—'}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="space-y-3">
+            <div className="bg-[#111113] border border-slate-800 rounded-xl p-4">
+              <div className="text-xs text-slate-500 uppercase tracking-wider mb-3">Подозрительные сообщения</div>
+              <div className="space-y-2 max-h-[620px] overflow-y-auto custom-scrollbar pr-1">
+                {reportCandidateMessages.length === 0 ? (
+                  <div className="text-xs text-slate-500 leading-relaxed">
+                    Пока нет материалов для отчета. Перейдите в режим очков, выберите чат и запустите проверку.
+                  </div>
+                ) : (
+                  reportCandidateMessages.map((message) => {
+                    const selected = message.id === selectedReportMessageId;
+                    const exceededCount = ENGINE_RISK_KEYS.filter(
+                      (riskKey) => message.scores[riskKey] >= message.thresholds[riskKey]
+                    ).length;
+                    return (
+                      <button
+                        key={`report-candidate-${message.id}`}
+                        type="button"
+                        onClick={() => {
+                          setSelectedPrivateMessageId(message.id);
+                          setSelectedReportMessageId(message.id);
+                        }}
+                        className={cn(
+                          "w-full text-left rounded-lg border p-3 transition-colors",
+                          selected
+                            ? "border-indigo-500/40 bg-indigo-500/10"
+                            : "border-slate-800 bg-slate-900/40 hover:border-slate-700"
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-xs text-slate-400 truncate">{message.time}</div>
+                          <div className="text-[11px] text-slate-300">
+                            {THREAT_LABELS[message.threatType]} {Math.round(message.score * 100)}%
+                          </div>
+                        </div>
+                        <div className="text-sm text-slate-200 mt-1 line-clamp-2">{message.text}</div>
+                        <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                          <span className="truncate max-w-[72%]">{message.sender}</span>
+                          <span>Порогов: {exceededCount}</span>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="xl:col-span-2 space-y-4">
+            {!selectedReportMessage ? (
+              <div className="bg-[#111113] border border-slate-800 rounded-xl p-6 text-sm text-slate-400">
+                Выберите подозрительное сообщение слева, чтобы подготовить отчет.
+              </div>
+            ) : (
+              <>
+                <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs uppercase tracking-wider text-slate-500">Карточка инцидента</div>
+                      <div className="text-base text-slate-100 mt-1">{THREAT_LABELS[selectedReportPrimaryRisk]}</div>
+                      <div className="text-xs text-slate-400 mt-1">
+                        {selectedReportMessage.time} • {selectedReportMessage.chat} • {selectedReportMessage.sender}
+                      </div>
+                    </div>
+                    <div
+                      className={cn(
+                        "text-xs px-3 py-1.5 rounded-lg border",
+                        reportPriorityMeta[reportPriority].badge
+                      )}
+                    >
+                      Приоритет: {reportPriorityMeta[reportPriority].label}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <label className="space-y-2">
+                      <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Приоритет</span>
+                      <select
+                        value={reportPriority}
+                        onChange={(e) => setReportPriority(e.target.value as ReportPriority)}
+                        className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                      >
+                        <option value="monitor">Мониторинг</option>
+                        <option value="high">Повышенный</option>
+                        <option value="critical">Критический</option>
+                      </select>
+                    </label>
+                    <label className="space-y-2 md:col-span-2">
+                      <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Ответственный аналитик</span>
+                      <input
+                        type="text"
+                        value={reportAnalyst}
+                        onChange={(e) => setReportAnalyst(e.target.value)}
+                        className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                        placeholder="ФИО или позывной"
+                      />
+                    </label>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Исходный текст сообщения</div>
+                    <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 text-sm text-slate-200 break-words">
+                      {selectedReportMessage.text}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
+                    {ENGINE_RISK_KEYS.map((riskKey) => {
+                      const score = selectedReportMessage.scores[riskKey];
+                      const threshold = selectedReportMessage.thresholds[riskKey];
+                      const exceeded = score >= threshold;
+                      return (
+                        <div
+                          key={`prep-risk-${selectedReportMessage.id}-${riskKey}`}
+                          className={cn(
+                            "rounded border px-2 py-1.5",
+                            exceeded
+                              ? "border-red-500/30 bg-red-500/10 text-red-200"
+                              : "border-slate-700 bg-slate-900/40 text-slate-300"
+                          )}
+                        >
+                          <div>{THREAT_LABELS[riskKey]}</div>
+                          <div>{score}% / порог {threshold}%</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <label className="space-y-2 block">
+                    <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Комментарий аналитика</span>
+                    <textarea
+                      value={reportComment}
+                      onChange={(e) => setReportComment(e.target.value)}
+                      rows={3}
+                      className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                      placeholder="Контекст, гипотезы и рекомендованные действия..."
+                    />
+                  </label>
+                </div>
+
+                <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-sm text-slate-200">Черновик отчета</div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void copyReportDraft()}
+                        className="px-3 py-1.5 rounded border border-indigo-500/30 text-indigo-300 text-xs hover:bg-indigo-500/10 transition-colors"
+                      >
+                        Скопировать черновик
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('points')}
+                        className="px-3 py-1.5 rounded border border-slate-600 text-slate-300 text-xs hover:bg-slate-800 transition-colors"
+                      >
+                        Вернуться в режим очков
+                      </button>
+                    </div>
+                  </div>
+                  <textarea
+                    value={reportDraftText}
+                    readOnly
+                    rows={14}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 font-mono leading-relaxed focus:outline-none"
+                  />
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -4005,6 +4416,15 @@ function SentinelApp() {
                 <MessageSquare className="w-4 h-4 mr-3" /> {'\u0420\u0435\u0436\u0438\u043c \u043e\u0447\u043a\u043e\u0432'}
               </button>
               <button
+                onClick={() => setActiveTab('reportPrep')}
+                className={cn(
+                  "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  activeTab === 'reportPrep' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                )}
+              >
+                <FileText className="w-4 h-4 mr-3" /> {'\u041f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\u043a\u0430 \u043e\u0442\u0447\u0435\u0442\u0430'}
+              </button>
+              <button
                 onClick={() => setActiveTab('mail')}
                 className={cn(
                   "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
@@ -4066,6 +4486,7 @@ function SentinelApp() {
               database: '\u0423\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u0411\u0414',
               agents: '\u0410\u0433\u0435\u043d\u0442\u044b',
               points: '\u0420\u0435\u0436\u0438\u043c \u043e\u0447\u043a\u043e\u0432',
+              reportPrep: '\u041f\u043e\u0434\u0433\u043e\u0442\u043e\u0432\u043a\u0430 \u043e\u0442\u0447\u0435\u0442\u0430',
               engine: '\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430 \u0434\u0432\u0438\u0436\u043a\u0430',
               engineTest: '\u0422\u0435\u0441\u0442 \u0434\u0432\u0438\u0436\u043a\u0430',
               mail: '\u041f\u043e\u0447\u0442\u0430 / SMTP',
@@ -4112,6 +4533,7 @@ function SentinelApp() {
           {activeTab === 'database' && renderDatabase()}
           {activeTab === 'agents' && renderSettings('agents')}
           {activeTab === 'points' && renderPoints()}
+          {activeTab === 'reportPrep' && renderReportPreparation()}
           {activeTab === 'engine' && renderSettings('engine')}
           {activeTab === 'engineTest' && renderSettings('engineTest')}
           {activeTab === 'mail' && renderSettings('mail')}
