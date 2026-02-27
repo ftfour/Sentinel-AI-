@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import dns from 'node:dns';
+import net from 'node:net';
 import { fileURLToPath } from 'url';
 import { env as hfEnv, pipeline } from '@huggingface/transformers';
 import Database from 'better-sqlite3';
@@ -1732,7 +1733,10 @@ function isGoogleSmtpHost(value: string): boolean {
   return host === 'smtp.gmail.com';
 }
 
-function createSmtpTransport(config: Pick<AlertNotificationConfig, 'smtpHost' | 'smtpPort' | 'smtpSecure' | 'smtpUser' | 'smtpPass'>): Transporter {
+function createSmtpTransport(
+  config: Pick<AlertNotificationConfig, 'smtpHost' | 'smtpPort' | 'smtpSecure' | 'smtpUser' | 'smtpPass'>,
+  options?: { connectHost?: string }
+): Transporter {
   const auth =
     config.smtpUser.length > 0
       ? {
@@ -1740,9 +1744,12 @@ function createSmtpTransport(config: Pick<AlertNotificationConfig, 'smtpHost' | 
           pass: config.smtpPass,
         }
       : undefined;
+  const connectHost = options?.connectHost?.trim();
+  const hostForConnection = connectHost && connectHost.length > 0 ? connectHost : config.smtpHost;
   const googleSmtp = isGoogleSmtpHost(config.smtpHost);
+  const tlsServername = !net.isIP(config.smtpHost) ? config.smtpHost : undefined;
   return nodemailer.createTransport({
-    host: config.smtpHost,
+    host: hostForConnection,
     port: config.smtpPort,
     secure: config.smtpSecure,
     auth,
@@ -1752,9 +1759,97 @@ function createSmtpTransport(config: Pick<AlertNotificationConfig, 'smtpHost' | 
     requireTLS: googleSmtp ? true : undefined,
     tls: {
       minVersion: 'TLSv1.2',
-      servername: googleSmtp ? 'smtp.gmail.com' : undefined,
+      servername: tlsServername,
     },
   });
+}
+
+function isSmtpNetworkUnreachable(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const ext = error as Error & { code?: unknown };
+  const code = typeof ext.code === 'string' ? ext.code : '';
+  const message = error.message.toLowerCase();
+  return (
+    code === 'ENETUNREACH' ||
+    code === 'EHOSTUNREACH' ||
+    message.includes('enetunreach') ||
+    message.includes('ehostunreach')
+  );
+}
+
+async function resolveIpv4Host(host: string): Promise<string | null> {
+  const normalized = host.trim();
+  if (!normalized) {
+    return null;
+  }
+  if (net.isIP(normalized) === 4) {
+    return normalized;
+  }
+  if (net.isIP(normalized) === 6) {
+    return null;
+  }
+  try {
+    const addresses = await dns.promises.resolve4(normalized);
+    const ipv4 = addresses.find((item) => typeof item === 'string' && item.trim().length > 0) ?? null;
+    return ipv4;
+  } catch {
+    return null;
+  }
+}
+
+async function verifySmtpWithFallback(
+  config: Pick<AlertNotificationConfig, 'smtpHost' | 'smtpPort' | 'smtpSecure' | 'smtpUser' | 'smtpPass'>
+): Promise<{ transporter: Transporter; usedIpv4Fallback: boolean }> {
+  const transporter = createSmtpTransport(config);
+  try {
+    await transporter.verify();
+    return { transporter, usedIpv4Fallback: false };
+  } catch (error) {
+    if (!isSmtpNetworkUnreachable(error)) {
+      throw error;
+    }
+    const ipv4Host = await resolveIpv4Host(config.smtpHost);
+    if (!ipv4Host) {
+      throw error;
+    }
+    const fallbackTransporter = createSmtpTransport(config, { connectHost: ipv4Host });
+    await fallbackTransporter.verify();
+    return { transporter: fallbackTransporter, usedIpv4Fallback: true };
+  }
+}
+
+async function sendMailWithFallback(
+  config: Pick<AlertNotificationConfig, 'smtpHost' | 'smtpPort' | 'smtpSecure' | 'smtpUser' | 'smtpPass'>,
+  mailOptions: any
+): Promise<{ info: any; usedIpv4Fallback: boolean }> {
+  const transporter = getAlertTransporter({
+    smtpHost: config.smtpHost,
+    smtpPort: config.smtpPort,
+    smtpSecure: config.smtpSecure,
+    smtpUser: config.smtpUser,
+    smtpPass: config.smtpPass,
+    emailFrom: '',
+    emailTo: [],
+    minScore: 0,
+    cooldownMs: 0,
+  });
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    return { info, usedIpv4Fallback: false };
+  } catch (error) {
+    if (!isSmtpNetworkUnreachable(error)) {
+      throw error;
+    }
+    const ipv4Host = await resolveIpv4Host(config.smtpHost);
+    if (!ipv4Host) {
+      throw error;
+    }
+    const fallbackTransporter = createSmtpTransport(config, { connectHost: ipv4Host });
+    const info = await fallbackTransporter.sendMail(mailOptions);
+    return { info, usedIpv4Fallback: true };
+  }
 }
 
 function getAlertTransporter(config: AlertNotificationConfig): Transporter {
@@ -1897,17 +1992,20 @@ async function runSmtpDiagnostics(
     verification.attempted = true;
     const startedAt = Date.now();
     try {
-      transporter = createSmtpTransport({
+      const verified = await verifySmtpWithFallback({
         smtpHost,
         smtpPort,
         smtpSecure,
         smtpUser,
         smtpPass,
       });
-      await transporter.verify();
+      transporter = verified.transporter;
       verification.success = true;
       verification.latencyMs = Date.now() - startedAt;
       addCheck('smtp-verify', 'ok', `SMTP server accepted connection in ${verification.latencyMs} ms.`);
+      if (verified.usedIpv4Fallback) {
+        addCheck('smtp-network', 'warn', 'IPv6 route is unavailable; SMTP switched to IPv4 fallback.');
+      }
     } catch (error) {
       verification.success = false;
       verification.latencyMs = Date.now() - startedAt;
@@ -1935,7 +2033,15 @@ async function runSmtpDiagnostics(
       addCheck('smtp-test-send', 'error', testEmail.error);
     } else {
       try {
-        const info = await transporter.sendMail({
+        const { info, usedIpv4Fallback } = await sendMailWithFallback(
+          {
+            smtpHost,
+            smtpPort,
+            smtpSecure,
+            smtpUser,
+            smtpPass,
+          },
+          {
           from: emailFrom,
           to: diagnosticRecipient,
           subject: '[Sentinel SMTP] Test message',
@@ -1945,10 +2051,14 @@ async function runSmtpDiagnostics(
             `Port: ${smtpPort}\n` +
             `Secure: ${smtpSecure ? 'yes' : 'no'}\n` +
             `Time: ${new Date().toISOString()}\n`,
-        });
+          }
+        );
         testEmail.sent = true;
         testEmail.messageId = typeof info?.messageId === 'string' ? info.messageId : null;
         addCheck('smtp-test-send', 'ok', `Test email sent to ${diagnosticRecipient}.`);
+        if (usedIpv4Fallback) {
+          addCheck('smtp-network', 'warn', 'Test email used IPv4 fallback due missing IPv6 route.');
+        }
       } catch (error) {
         testEmail.error = toSmtpDiagnosticErrorMessage(error);
         addCheck('smtp-test-send', 'error', `Test email send failed: ${testEmail.error}`);
@@ -2015,37 +2125,45 @@ async function sendThreatAlertEmail(payload: {
     return;
   }
 
-  const transporter = getAlertTransporter(config);
   const scorePercent = Math.round(clamp01(payload.score) * 100);
   const timestampIso = new Date(payload.messageTs * 1000).toISOString();
   const messageText =
     payload.text.length > 4000 ? `${payload.text.slice(0, 4000)}\n...[truncated]` : payload.text;
 
-  await transporter.sendMail({
-    from: config.emailFrom,
-    to: config.emailTo.join(', '),
-    subject: `[Sentinel] ${payload.type.toUpperCase()} detected (${scorePercent}%)`,
-    text:
-      `Sentinel AI detected a threat.\n\n` +
-      `Type: ${payload.type}\n` +
-      `Score: ${scorePercent}%\n` +
-      `Time: ${timestampIso}\n` +
-      `Chat: ${payload.chat}\n` +
-      `Sender: ${payload.sender}\n` +
-      `Telegram chat ID: ${payload.telegramChatId ?? 'n/a'}\n` +
-      `Telegram message ID: ${payload.telegramMessageId ?? 'n/a'}\n\n` +
-      `Message:\n${messageText}`,
-    html:
-      `<p><strong>Sentinel AI detected a threat</strong></p>` +
-      `<p><strong>Type:</strong> ${escapeHtml(payload.type)}<br/>` +
-      `<strong>Score:</strong> ${scorePercent}%<br/>` +
-      `<strong>Time:</strong> ${escapeHtml(timestampIso)}<br/>` +
-      `<strong>Chat:</strong> ${escapeHtml(payload.chat)}<br/>` +
-      `<strong>Sender:</strong> ${escapeHtml(payload.sender)}<br/>` +
-      `<strong>Telegram chat ID:</strong> ${escapeHtml(payload.telegramChatId ?? 'n/a')}<br/>` +
-      `<strong>Telegram message ID:</strong> ${escapeHtml(String(payload.telegramMessageId ?? 'n/a'))}</p>` +
-      `<p><strong>Message</strong></p><pre>${escapeHtml(messageText)}</pre>`,
-  });
+  await sendMailWithFallback(
+    {
+      smtpHost: config.smtpHost,
+      smtpPort: config.smtpPort,
+      smtpSecure: config.smtpSecure,
+      smtpUser: config.smtpUser,
+      smtpPass: config.smtpPass,
+    },
+    {
+      from: config.emailFrom,
+      to: config.emailTo.join(', '),
+      subject: `[Sentinel] ${payload.type.toUpperCase()} detected (${scorePercent}%)`,
+      text:
+        `Sentinel AI detected a threat.\n\n` +
+        `Type: ${payload.type}\n` +
+        `Score: ${scorePercent}%\n` +
+        `Time: ${timestampIso}\n` +
+        `Chat: ${payload.chat}\n` +
+        `Sender: ${payload.sender}\n` +
+        `Telegram chat ID: ${payload.telegramChatId ?? 'n/a'}\n` +
+        `Telegram message ID: ${payload.telegramMessageId ?? 'n/a'}\n\n` +
+        `Message:\n${messageText}`,
+      html:
+        `<p><strong>Sentinel AI detected a threat</strong></p>` +
+        `<p><strong>Type:</strong> ${escapeHtml(payload.type)}<br/>` +
+        `<strong>Score:</strong> ${scorePercent}%<br/>` +
+        `<strong>Time:</strong> ${escapeHtml(timestampIso)}<br/>` +
+        `<strong>Chat:</strong> ${escapeHtml(payload.chat)}<br/>` +
+        `<strong>Sender:</strong> ${escapeHtml(payload.sender)}<br/>` +
+        `<strong>Telegram chat ID:</strong> ${escapeHtml(payload.telegramChatId ?? 'n/a')}<br/>` +
+        `<strong>Telegram message ID:</strong> ${escapeHtml(String(payload.telegramMessageId ?? 'n/a'))}</p>` +
+        `<p><strong>Message</strong></p><pre>${escapeHtml(messageText)}</pre>`,
+    }
+  );
   alertCooldownStore.set(cooldownKey, now + config.cooldownMs);
 }
 
@@ -2874,30 +2992,29 @@ app.post('/api/reports/email', isAdmin, RL_REPORT_EMAIL, async (req, res) => {
   }
 
   try {
-    const transporter = getAlertTransporter({
+    const { info, usedIpv4Fallback } = await sendMailWithFallback(
+      {
       smtpHost,
       smtpPort,
       smtpSecure,
       smtpUser,
       smtpPass,
-      emailFrom: fallbackFrom,
-      emailTo: recipients,
-      minScore: 0,
-      cooldownMs: 0,
-    });
-    const info = await transporter.sendMail({
-      from: fallbackFrom,
-      to: recipients.join(', '),
-      subject,
-      text: body,
-      html: `<pre>${escapeHtml(body)}</pre>`,
-    });
+      },
+      {
+        from: fallbackFrom,
+        to: recipients.join(', '),
+        subject,
+        text: body,
+        html: `<pre>${escapeHtml(body)}</pre>`,
+      }
+    );
 
     res.json({
       ok: true,
       messageId: typeof info?.messageId === 'string' ? info.messageId : null,
       recipients: recipients.length,
       from: fallbackFrom,
+      usedIpv4Fallback,
     });
   } catch (error) {
     res.status(500).json({ error: `Failed to send report email: ${toSmtpDiagnosticErrorMessage(error)}` });
