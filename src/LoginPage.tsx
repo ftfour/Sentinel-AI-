@@ -14,7 +14,7 @@ const LoginPage = () => {
     setError('');
     const success = await auth.login(username, password);
     if (success) {
-      navigate('/');
+      navigate('/app');
     } else {
       setError('Invalid username or password');
     }

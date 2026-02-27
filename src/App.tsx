@@ -96,6 +96,15 @@ const THREAT_LABELS = {
   drugs: 'Наркотики',
   terrorism: 'Терроризм',
 } as const;
+const EMPTY_THREAT_STATS: Record<ThreatLabel, number> = {
+  safe: 0,
+  toxicity: 0,
+  threat: 0,
+  scam: 0,
+  recruitment: 0,
+  drugs: 0,
+  terrorism: 0,
+};
 
 type ModelOption = {
   id: string;
@@ -792,6 +801,340 @@ function mergePrivateRamMessages(
   });
 }
 
+function dangerBadgeClass(type: ThreatLabel): string {
+  if (type === 'toxicity') return 'bg-amber-500/10 text-amber-300 border border-amber-500/30';
+  if (type === 'threat') return 'bg-red-500/10 text-red-300 border border-red-500/30';
+  if (type === 'recruitment') return 'bg-sky-500/10 text-sky-300 border border-sky-500/30';
+  if (type === 'drugs') return 'bg-yellow-500/10 text-yellow-300 border border-yellow-500/30';
+  if (type === 'terrorism') return 'bg-rose-500/10 text-rose-300 border border-rose-500/30';
+  if (type === 'scam') return 'bg-violet-500/10 text-violet-300 border border-violet-500/30';
+  return 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30';
+}
+
+function PublicThreatBoard() {
+  const { user } = useAuth();
+  const [dangerMessages, setDangerMessages] = useState<FeedMessage[]>([]);
+  const [stats, setStats] = useState<Record<ThreatLabel, number>>({ ...EMPTY_THREAT_STATS });
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState('');
+  const [lastUpdated, setLastUpdated] = useState('');
+
+  const parseFeedType = (value: unknown): ThreatLabel => {
+    if (
+      value === 'safe' ||
+      value === 'toxicity' ||
+      value === 'threat' ||
+      value === 'scam' ||
+      value === 'recruitment' ||
+      value === 'drugs' ||
+      value === 'terrorism'
+    ) {
+      return value;
+    }
+    return 'safe';
+  };
+
+  const parseFeedMessage = (item: any, fallbackId: number): FeedMessage => ({
+    id: Math.max(1, Math.floor(numberOrFallback(item?.id, fallbackId))),
+    time: typeof item?.time === 'string' ? item.time : '',
+    chat: typeof item?.chat === 'string' && item.chat.trim().length > 0 ? item.chat : 'Unknown chat',
+    sender: typeof item?.sender === 'string' && item.sender.trim().length > 0 ? item.sender : 'Unknown sender',
+    text: typeof item?.text === 'string' ? item.text : '',
+    type: parseFeedType(item?.type),
+    score: Math.max(0, Math.min(1, numberOrFallback(item?.score, 0))),
+  });
+
+  const refreshPublicData = async (showLoader = false): Promise<void> => {
+    if (showLoader) {
+      setIsLoading(true);
+    } else {
+      setIsRefreshing(true);
+    }
+
+    try {
+      const [dangerRes, statsRes] = await Promise.all([
+        fetch('/api/public/dangers?limit=1000'),
+        fetch('/api/public/stats'),
+      ]);
+
+      if (!dangerRes.ok) {
+        throw new Error(`Danger feed is unavailable (${dangerRes.status})`);
+      }
+      if (!statsRes.ok) {
+        throw new Error(`Stats feed is unavailable (${statsRes.status})`);
+      }
+
+      const dangerPayload = await dangerRes.json();
+      const statsPayload = await statsRes.json();
+
+      const rawItems = Array.isArray(dangerPayload)
+        ? dangerPayload
+        : Array.isArray(dangerPayload?.items)
+          ? dangerPayload.items
+          : [];
+      const parsedItems = rawItems
+        .map((item: any, index: number) => parseFeedMessage(item, Date.now() + index))
+        .filter((item: FeedMessage) => item.type !== 'safe');
+
+      setDangerMessages(parsedItems);
+      setStats({
+        safe: numberOrFallback(statsPayload?.safe, 0),
+        toxicity: numberOrFallback(statsPayload?.toxicity, 0),
+        threat: numberOrFallback(statsPayload?.threat, 0),
+        scam: numberOrFallback(statsPayload?.scam, 0),
+        recruitment: numberOrFallback(statsPayload?.recruitment, 0),
+        drugs: numberOrFallback(statsPayload?.drugs, 0),
+        terrorism: numberOrFallback(statsPayload?.terrorism, 0),
+      });
+
+      const updatedAtRaw =
+        typeof statsPayload?.updatedAt === 'string'
+          ? statsPayload.updatedAt
+          : typeof dangerPayload?.updatedAt === 'string'
+            ? dangerPayload.updatedAt
+            : '';
+      setLastUpdated(
+        updatedAtRaw
+          ? new Date(updatedAtRaw).toLocaleString('ru-RU')
+          : new Date().toLocaleString('ru-RU')
+      );
+      setError('');
+    } catch (err) {
+      console.error('Failed to load public threat board', err);
+      setError((err as Error).message || 'Не удалось загрузить публичную панель');
+    } finally {
+      if (showLoader) {
+        setIsLoading(false);
+      }
+      setIsRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshPublicData(true);
+    const interval = setInterval(() => {
+      void refreshPublicData(false);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const explicitThreats = dangerMessages.filter((message) => message.type === 'threat');
+  const sortedDangerMessages = [...dangerMessages].sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+    return right.id - left.id;
+  });
+  const rankedCategories = (['threat', 'scam', 'toxicity', 'recruitment', 'drugs', 'terrorism'] as ThreatLabel[])
+    .map((type) => ({ type, value: numberOrFallback(stats[type], 0) }))
+    .sort((left, right) => right.value - left.value);
+  const dominantCategory = rankedCategories[0] ?? { type: 'safe' as ThreatLabel, value: 0 };
+  const maxCategoryCount = Math.max(1, ...rankedCategories.map((item) => item.value));
+
+  const renderDangerItem = (message: FeedMessage) => {
+    const normalizedText = message.text.trim().length > 0 ? message.text : '[Нет текста]';
+    const scorePercent = Math.round(message.score * 100);
+    const barWidth = Math.max(6, scorePercent);
+    return (
+      <article
+        key={`${message.id}-${message.type}`}
+        className="rounded-lg border border-slate-800 bg-slate-900/40 p-4 hover:border-slate-700 transition-colors"
+      >
+        <div className="flex items-start justify-between gap-3 mb-2">
+          <div className="text-xs text-slate-400 space-y-1">
+            <div className="font-mono text-[11px] uppercase tracking-wider">{message.time || '--:--:--'}</div>
+            <div className="text-slate-300">{message.chat}</div>
+            <div className="text-slate-500">{message.sender}</div>
+          </div>
+          <span className={cn('text-[10px] uppercase tracking-wider px-2 py-1 rounded-full font-semibold', dangerBadgeClass(message.type))}>
+            {THREAT_LABELS[message.type]}
+          </span>
+        </div>
+        <p className="text-sm text-slate-200 leading-relaxed break-words mb-3">{normalizedText}</p>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between text-[11px] text-slate-400">
+            <span>Подозрительность</span>
+            <span className="font-mono text-slate-300">{scorePercent}%</span>
+          </div>
+          <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+            <div
+              className={cn(
+                'h-full rounded-full',
+                message.type === 'threat' || message.type === 'terrorism'
+                  ? 'bg-red-500/90'
+                  : message.type === 'toxicity'
+                    ? 'bg-amber-500/90'
+                    : message.type === 'scam'
+                      ? 'bg-violet-500/90'
+                      : message.type === 'recruitment'
+                        ? 'bg-sky-500/90'
+                        : 'bg-yellow-500/90'
+              )}
+              style={{ width: `${barWidth}%` }}
+            />
+          </div>
+        </div>
+      </article>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-[#07070A] text-slate-100">
+      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.16),transparent_42%),radial-gradient(circle_at_top_left,rgba(239,68,68,0.14),transparent_38%)]" />
+      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+        <header className="rounded-2xl border border-slate-800 bg-[#0d0e12]/90 backdrop-blur p-5 md:p-6">
+          <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-3">
+              <div className="inline-flex items-center px-3 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs font-medium tracking-wide">
+                <Shield className="w-3.5 h-3.5 mr-2" />
+                Публичная панель угроз Sentinel AI
+              </div>
+              <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">
+                Мониторинг опасных сообщений без авторизации
+              </h1>
+              <p className="text-slate-400 max-w-3xl">
+                Этот экран открыт по ссылке и показывает текущие опасные сообщения из потока. Для администрирования,
+                настройки агентов и управления движком используйте вход администратора.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2 md:justify-end">
+              <button
+                onClick={() => void refreshPublicData(false)}
+                disabled={isRefreshing}
+                className={cn(
+                  'inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium border transition-colors',
+                  isRefreshing
+                    ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
+                    : 'bg-slate-900 text-slate-200 border-slate-700 hover:bg-slate-800'
+                )}
+              >
+                <RefreshCw className={cn('w-4 h-4 mr-2', isRefreshing && 'animate-spin')} />
+                Обновить
+              </button>
+              <Link
+                to={user ? '/app' : '/login'}
+                className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+              >
+                <Lock className="w-4 h-4 mr-2" />
+                {user ? 'Открыть админ-панель' : 'Войти как администратор'}
+              </Link>
+            </div>
+          </div>
+        </header>
+
+        <section className="rounded-2xl border border-slate-800 bg-gradient-to-r from-slate-900/80 via-slate-900/70 to-slate-900/80 p-5 md:p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-2">
+              <h2 className="text-lg md:text-xl font-semibold text-slate-100">Проверка работы в тестовой группе</h2>
+              <p className="text-slate-300">
+                Хотите проверить систему? Зайдите в Telegram-группу <span className="font-mono text-cyan-300">@test123423123</span> и
+                отправьте свой текст. После обработки сообщение появится на этой панели с категорией и процентом подозрительности.
+              </p>
+            </div>
+            <a
+              href="https://t.me/test123423123"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20 transition-colors text-sm font-medium"
+            >
+              Открыть группу в Telegram
+            </a>
+          </div>
+        </section>
+
+        <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="rounded-xl border border-slate-800 bg-[#111318] p-5">
+            <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Всего опасных сообщений</div>
+            <div className="text-3xl font-light text-slate-100">{dangerMessages.length}</div>
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-[#111318] p-5">
+            <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Явные угрозы (threat)</div>
+            <div className="text-3xl font-light text-red-300">{explicitThreats.length}</div>
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-[#111318] p-5">
+            <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Доминирующая категория</div>
+            <div className="text-lg font-medium text-slate-100">{THREAT_LABELS[dominantCategory.type]}</div>
+            <div className="text-xs text-slate-400 mt-1">Сообщений: {dominantCategory.value}</div>
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-[#111318] p-5">
+            <div className="text-xs uppercase tracking-wider text-slate-500 mb-2">Последнее обновление</div>
+            <div className="text-sm text-slate-200">{lastUpdated || '—'}</div>
+            {isRefreshing && <div className="text-xs text-indigo-300 mt-2">Обновление...</div>}
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-slate-800 bg-[#111318] p-5">
+          <div className="text-sm font-semibold text-slate-200 mb-3">Распределение по категориям</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {rankedCategories.map((item) => (
+              <div key={`public-cat-${item.type}`} className="rounded-lg border border-slate-800 bg-slate-900/50 px-3 py-3">
+                <div className="flex items-center justify-between text-sm mb-2">
+                  <span className="text-slate-300">{THREAT_LABELS[item.type]}</span>
+                  <span className="text-slate-400 font-mono">{item.value}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-indigo-400/90"
+                    style={{ width: `${Math.round((item.value / maxCategoryCount) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="grid grid-cols-1 xl:grid-cols-2 gap-5 pb-8">
+          <div className="rounded-xl border border-slate-800 bg-[#111318] overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/20 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-200 flex items-center">
+                <AlertTriangle className="w-4 h-4 mr-2 text-red-400" />
+                Явные угрозы
+              </h3>
+              <span className="text-xs font-mono text-red-300">{explicitThreats.length}</span>
+            </div>
+            <div className="p-4 space-y-3 max-h-[620px] overflow-y-auto custom-scrollbar">
+              {isLoading ? (
+                <div className="text-sm text-slate-500 py-10 text-center">Загрузка данных...</div>
+              ) : explicitThreats.length === 0 ? (
+                <div className="text-sm text-slate-500 py-10 text-center">Явные угрозы пока не обнаружены</div>
+              ) : (
+                explicitThreats.map(renderDangerItem)
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-[#111318] overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/20 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-200 flex items-center">
+                <MessageSquare className="w-4 h-4 mr-2 text-amber-400" />
+                Все опасные сообщения
+              </h3>
+              <span className="text-xs font-mono text-amber-300">{sortedDangerMessages.length}</span>
+            </div>
+            <div className="p-4 space-y-3 max-h-[620px] overflow-y-auto custom-scrollbar">
+              {isLoading ? (
+                <div className="text-sm text-slate-500 py-10 text-center">Загрузка данных...</div>
+              ) : sortedDangerMessages.length === 0 ? (
+                <div className="text-sm text-slate-500 py-10 text-center">Опасные сообщения пока отсутствуют</div>
+              ) : (
+                sortedDangerMessages.map(renderDangerItem)
+              )}
+            </div>
+          </div>
+        </section>
+
+        {error && (
+          <section className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            Ошибка загрузки публичной панели: {error}
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // --- MAIN APP COMPONENT ---
 function SentinelApp() {
   const { user, logout } = useAuth();
@@ -801,15 +1144,7 @@ function SentinelApp() {
   // Dashboard State
   const [messages, setMessages] = useState<FeedMessage[]>([]);
   const [dangerMessages, setDangerMessages] = useState<FeedMessage[]>([]);
-  const [stats, setStats] = useState<Record<ThreatLabel, number>>({
-    safe: 0,
-    toxicity: 0,
-    threat: 0,
-    scam: 0,
-    recruitment: 0,
-    drugs: 0,
-    terrorism: 0,
-  });
+  const [stats, setStats] = useState<Record<ThreatLabel, number>>({ ...EMPTY_THREAT_STATS });
   const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
   const [isLoadingDbStatus, setIsLoadingDbStatus] = useState(false);
   const [dbAction, setDbAction] = useState<'clear' | 'vacuum' | null>(null);
@@ -4751,10 +5086,12 @@ export default function App() {
     <AuthProvider>
       <Router>
         <Routes>
+          <Route path="/" element={<PublicThreatBoard />} />
           <Route path="/login" element={<LoginPage />} />
           <Route element={<PrivateRoute />}>
-            <Route path="/" element={<SentinelApp />} />
+            <Route path="/app" element={<SentinelApp />} />
           </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
     </AuthProvider>
