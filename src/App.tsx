@@ -381,6 +381,16 @@ type SettingsState = {
   urlScamBoost: number;
   keywordHitBoost: number;
   criticalHitFloor: number;
+  alertingEnabled: boolean;
+  alertSmtpHost: string;
+  alertSmtpPort: number;
+  alertSmtpSecure: boolean;
+  alertSmtpUser: string;
+  alertSmtpPass: string;
+  alertEmailFrom: string;
+  alertEmailTo: string;
+  alertMinScore: number;
+  alertCooldownSec: number;
 };
 
 type AvailableTelegramChat = {
@@ -478,6 +488,16 @@ const DEFAULT_SETTINGS: SettingsState = {
   urlScamBoost: 24,
   keywordHitBoost: 16,
   criticalHitFloor: 84,
+  alertingEnabled: false,
+  alertSmtpHost: '',
+  alertSmtpPort: 587,
+  alertSmtpSecure: false,
+  alertSmtpUser: '',
+  alertSmtpPass: '',
+  alertEmailFrom: '',
+  alertEmailTo: '',
+  alertMinScore: 80,
+  alertCooldownSec: 300,
 };
 
 function normalizeChatList(value: unknown): string[] {
@@ -803,6 +823,16 @@ function SentinelApp() {
     urlScamBoost: source.urlScamBoost,
     keywordHitBoost: source.keywordHitBoost,
     criticalHitFloor: source.criticalHitFloor,
+    alertingEnabled: source.alertingEnabled,
+    alertSmtpHost: source.alertSmtpHost,
+    alertSmtpPort: source.alertSmtpPort,
+    alertSmtpSecure: source.alertSmtpSecure,
+    alertSmtpUser: source.alertSmtpUser,
+    alertSmtpPass: source.alertSmtpPass,
+    alertEmailFrom: source.alertEmailFrom,
+    alertEmailTo: source.alertEmailTo,
+    alertMinScore: source.alertMinScore,
+    alertCooldownSec: source.alertCooldownSec,
   });
 
   const toEngineSettingsPayload = (source: SettingsState) => ({
@@ -904,6 +934,16 @@ function SentinelApp() {
       urlScamBoost: clampPercent(numberOrFallback(saved?.urlScamBoost, prev.urlScamBoost), 0, 100),
       keywordHitBoost: clampPercent(numberOrFallback(saved?.keywordHitBoost, prev.keywordHitBoost), 0, 100),
       criticalHitFloor: clampPercent(numberOrFallback(saved?.criticalHitFloor, prev.criticalHitFloor), 0, 100),
+      alertingEnabled: typeof saved?.alertingEnabled === 'boolean' ? saved.alertingEnabled : prev.alertingEnabled,
+      alertSmtpHost: typeof saved?.alertSmtpHost === 'string' ? saved.alertSmtpHost : prev.alertSmtpHost,
+      alertSmtpPort: clampPercent(numberOrFallback(saved?.alertSmtpPort, prev.alertSmtpPort), 1, 65535),
+      alertSmtpSecure: typeof saved?.alertSmtpSecure === 'boolean' ? saved.alertSmtpSecure : prev.alertSmtpSecure,
+      alertSmtpUser: typeof saved?.alertSmtpUser === 'string' ? saved.alertSmtpUser : prev.alertSmtpUser,
+      alertSmtpPass: typeof saved?.alertSmtpPass === 'string' ? saved.alertSmtpPass : prev.alertSmtpPass,
+      alertEmailFrom: typeof saved?.alertEmailFrom === 'string' ? saved.alertEmailFrom : prev.alertEmailFrom,
+      alertEmailTo: typeof saved?.alertEmailTo === 'string' ? saved.alertEmailTo : prev.alertEmailTo,
+      alertMinScore: clampPercent(numberOrFallback(saved?.alertMinScore, prev.alertMinScore), 1, 99),
+      alertCooldownSec: clampPercent(numberOrFallback(saved?.alertCooldownSec, prev.alertCooldownSec), 10, 86400),
       mediaTypes: {
         ...prev.mediaTypes,
         ...(saved?.mediaTypes ?? {}),
@@ -2697,6 +2737,144 @@ function SentinelApp() {
                       </label>
                     </div>
                   )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between">
+              <div className="flex items-center">
+                <AlertTriangle className="w-5 h-5 mr-3 text-amber-400" />
+                <h3 className="text-sm font-semibold text-slate-200">SMTP Alerts</h3>
+              </div>
+              <label className="flex items-center cursor-pointer">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={settings.alertingEnabled}
+                    onChange={() => setSettings((prev) => ({ ...prev, alertingEnabled: !prev.alertingEnabled }))}
+                  />
+                  <div className={cn("block w-10 h-6 rounded-full transition-colors", settings.alertingEnabled ? "bg-amber-500" : "bg-slate-700")}></div>
+                  <div className={cn("dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform", settings.alertingEnabled ? "transform translate-x-4" : "")}></div>
+                </div>
+                <span className="ml-3 text-sm font-medium text-slate-300">Enable email alerts</span>
+              </label>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-400">
+                When enabled, Sentinel sends an email if a message is classified as dangerous and score is above the configured threshold.
+              </p>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">SMTP host</label>
+                  <input
+                    type="text"
+                    value={settings.alertSmtpHost}
+                    onChange={(e) => setSettings((prev) => ({ ...prev, alertSmtpHost: e.target.value }))}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+                    placeholder="smtp.example.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">SMTP port</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={settings.alertSmtpPort}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        alertSmtpPort: clampPercent(numberOrFallback(e.target.value, prev.alertSmtpPort), 1, 65535),
+                      }))
+                    }
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">SMTP username</label>
+                  <input
+                    type="text"
+                    value={settings.alertSmtpUser}
+                    onChange={(e) => setSettings((prev) => ({ ...prev, alertSmtpUser: e.target.value }))}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+                    placeholder="alerts@example.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">SMTP password</label>
+                  <input
+                    type="password"
+                    value={settings.alertSmtpPass}
+                    onChange={(e) => setSettings((prev) => ({ ...prev, alertSmtpPass: e.target.value }))}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">From email</label>
+                  <input
+                    type="email"
+                    value={settings.alertEmailFrom}
+                    onChange={(e) => setSettings((prev) => ({ ...prev, alertEmailFrom: e.target.value }))}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+                    placeholder="sentinel@example.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Recipient emails</label>
+                  <input
+                    type="text"
+                    value={settings.alertEmailTo}
+                    onChange={(e) => setSettings((prev) => ({ ...prev, alertEmailTo: e.target.value }))}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+                    placeholder="ops@example.com, admin@example.com"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <label className="flex items-center justify-between rounded-lg border border-slate-800 bg-[#0A0A0B] px-3 py-2">
+                  <span className="text-xs text-slate-300">Use secure SMTP (SSL/TLS)</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.alertSmtpSecure}
+                    onChange={() => setSettings((prev) => ({ ...prev, alertSmtpSecure: !prev.alertSmtpSecure }))}
+                    className="h-4 w-4 accent-amber-500"
+                  />
+                </label>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Minimum alert score (%)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={99}
+                    value={settings.alertMinScore}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        alertMinScore: clampPercent(numberOrFallback(e.target.value, prev.alertMinScore), 1, 99),
+                      }))
+                    }
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Cooldown per chat/type (sec)</label>
+                  <input
+                    type="number"
+                    min={10}
+                    max={86400}
+                    value={settings.alertCooldownSec}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        alertCooldownSec: clampPercent(numberOrFallback(e.target.value, prev.alertCooldownSec), 10, 86400),
+                      }))
+                    }
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+                  />
                 </div>
               </div>
             </div>

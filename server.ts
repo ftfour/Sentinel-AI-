@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { env as hfEnv, pipeline } from '@huggingface/transformers';
 import Database from 'better-sqlite3';
+import nodemailer, { type Transporter } from 'nodemailer';
 
 // Define a custom session type
 declare module 'express-session' {
@@ -87,6 +88,16 @@ type PersistedAppSettings = {
   urlScamBoost: number; // 0..100
   keywordHitBoost: number; // 0..100
   criticalHitFloor: number; // 0..100
+  alertingEnabled: boolean;
+  alertSmtpHost: string;
+  alertSmtpPort: number; // 1..65535
+  alertSmtpSecure: boolean;
+  alertSmtpUser: string;
+  alertSmtpPass: string;
+  alertEmailFrom: string;
+  alertEmailTo: string;
+  alertMinScore: number; // 1..99
+  alertCooldownSec: number; // 10..86400
 };
 type TelegramUserCredentials = {
   apiId: number;
@@ -170,6 +181,9 @@ const users: UserStore = {
 const SESSION_AUTH_TTL_MS = 15 * 60 * 1000;
 const pendingSessionAuth = new Map<string, PendingSessionAuth>();
 const rateLimitStore = new Map<string, RateLimitEntry>();
+const alertCooldownStore = new Map<string, number>();
+let smtpTransportCache: { key: string; transporter: Transporter } | null = null;
+let lastAlertConfigWarningAt = 0;
 
 let client: TelegramClient | null = null;
 let isRunning = false;
@@ -184,6 +198,17 @@ type ThreatType =
   | 'terrorism';
 type RiskCategory = Exclude<ThreatType, 'safe'>;
 type RiskScores = Record<RiskCategory, number>;
+type AlertNotificationConfig = {
+  smtpHost: string;
+  smtpPort: number;
+  smtpSecure: boolean;
+  smtpUser: string;
+  smtpPass: string;
+  emailFrom: string;
+  emailTo: string[];
+  minScore: number;
+  cooldownMs: number;
+};
 const RISK_CATEGORIES: RiskCategory[] = [
   'toxicity',
   'threat',
@@ -916,6 +941,16 @@ const DEFAULT_PERSISTED_SETTINGS: PersistedAppSettings = {
   urlScamBoost: 24,
   keywordHitBoost: 16,
   criticalHitFloor: 84,
+  alertingEnabled: false,
+  alertSmtpHost: '',
+  alertSmtpPort: 587,
+  alertSmtpSecure: false,
+  alertSmtpUser: '',
+  alertSmtpPass: '',
+  alertEmailFrom: '',
+  alertEmailTo: '',
+  alertMinScore: 80,
+  alertCooldownSec: 300,
 };
 type TextClassifier = (...args: unknown[]) => Promise<unknown>;
 const classifierCache = new Map<string, Promise<TextClassifier>>();
@@ -1053,6 +1088,25 @@ function normalizeBoundedInteger(
     return fallbackSafe;
   }
   return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function normalizeEmailList(value: string): string[] {
+  const unique = new Set<string>();
+  const result: string[] = [];
+  for (const chunk of value.split(/[,;\r\n]+/g)) {
+    const candidate = chunk.trim().toLowerCase();
+    if (!candidate || !candidate.includes('@') || unique.has(candidate)) {
+      continue;
+    }
+    unique.add(candidate);
+    result.push(candidate);
+  }
+  return result;
+}
+
+function normalizeEmailListString(value: unknown, fallback: string): string {
+  const source = typeof value === 'string' ? value : fallback;
+  return normalizeEmailList(source).join(', ');
 }
 
 function normalizeCategoryThresholds(
@@ -1199,6 +1253,16 @@ function sanitizePersistedSettings(
     urlScamBoost: normalizePercent(raw.urlScamBoost, fallback.urlScamBoost, 0, 100),
     keywordHitBoost: normalizePercent(raw.keywordHitBoost, fallback.keywordHitBoost, 0, 100),
     criticalHitFloor: normalizePercent(raw.criticalHitFloor, fallback.criticalHitFloor, 0, 100),
+    alertingEnabled: toBooleanValue(raw.alertingEnabled, fallback.alertingEnabled),
+    alertSmtpHost: toStringValue(raw.alertSmtpHost, fallback.alertSmtpHost).trim(),
+    alertSmtpPort: normalizeBoundedInteger(raw.alertSmtpPort, fallback.alertSmtpPort, 1, 65535),
+    alertSmtpSecure: toBooleanValue(raw.alertSmtpSecure, fallback.alertSmtpSecure),
+    alertSmtpUser: toStringValue(raw.alertSmtpUser, fallback.alertSmtpUser).trim(),
+    alertSmtpPass: toStringValue(raw.alertSmtpPass, fallback.alertSmtpPass),
+    alertEmailFrom: toStringValue(raw.alertEmailFrom, fallback.alertEmailFrom).trim(),
+    alertEmailTo: normalizeEmailListString(raw.alertEmailTo, fallback.alertEmailTo),
+    alertMinScore: normalizeThresholdPercent(raw.alertMinScore, fallback.alertMinScore),
+    alertCooldownSec: normalizeBoundedInteger(raw.alertCooldownSec, fallback.alertCooldownSec, 10, 86400),
   };
 }
 
@@ -1220,6 +1284,142 @@ function loadPersistedSettings(): PersistedAppSettings {
 function savePersistedSettings(settings: PersistedAppSettings): void {
   fs.mkdirSync(RUNTIME_DIR, { recursive: true });
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2), { encoding: 'utf8', mode: 0o600 });
+}
+
+function getAlertNotificationConfig(settings: PersistedAppSettings): AlertNotificationConfig | null {
+  if (!settings.alertingEnabled) {
+    return null;
+  }
+
+  const smtpHost = settings.alertSmtpHost.trim();
+  const emailFrom = settings.alertEmailFrom.trim();
+  const emailTo = normalizeEmailList(settings.alertEmailTo);
+  if (!smtpHost || !emailFrom || emailTo.length === 0) {
+    return null;
+  }
+
+  return {
+    smtpHost,
+    smtpPort: settings.alertSmtpPort,
+    smtpSecure: settings.alertSmtpSecure,
+    smtpUser: settings.alertSmtpUser.trim(),
+    smtpPass: settings.alertSmtpPass,
+    emailFrom,
+    emailTo,
+    minScore: clamp01(settings.alertMinScore / 100),
+    cooldownMs: Math.max(10_000, settings.alertCooldownSec * 1000),
+  };
+}
+
+function getAlertTransporter(config: AlertNotificationConfig): Transporter {
+  const transportKey = JSON.stringify([
+    config.smtpHost,
+    config.smtpPort,
+    config.smtpSecure,
+    config.smtpUser,
+    config.smtpPass,
+  ]);
+  if (smtpTransportCache && smtpTransportCache.key === transportKey) {
+    return smtpTransportCache.transporter;
+  }
+
+  const auth =
+    config.smtpUser.length > 0
+      ? {
+          user: config.smtpUser,
+          pass: config.smtpPass,
+        }
+      : undefined;
+  const transporter = nodemailer.createTransport({
+    host: config.smtpHost,
+    port: config.smtpPort,
+    secure: config.smtpSecure,
+    auth,
+  });
+  smtpTransportCache = { key: transportKey, transporter };
+  return transporter;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function sendThreatAlertEmail(payload: {
+  type: ThreatType;
+  score: number;
+  text: string;
+  chat: string;
+  sender: string;
+  messageTs: number;
+  telegramChatId: string | null;
+  telegramMessageId: number | null;
+}): Promise<void> {
+  if (payload.type === 'safe') {
+    return;
+  }
+
+  if (!persistedSettings.alertingEnabled) {
+    return;
+  }
+
+  const config = getAlertNotificationConfig(persistedSettings);
+  if (!config) {
+    const now = Date.now();
+    if (now - lastAlertConfigWarningAt >= 5 * 60 * 1000) {
+      lastAlertConfigWarningAt = now;
+      console.warn('Alerting is enabled but SMTP settings are incomplete. Fill SMTP host, from and recipients.');
+    }
+    return;
+  }
+
+  if (payload.score < config.minScore) {
+    return;
+  }
+
+  const cooldownKey = `${payload.type}|${payload.telegramChatId ?? payload.chat}`;
+  const now = Date.now();
+  const nextAllowedAt = alertCooldownStore.get(cooldownKey) ?? 0;
+  if (nextAllowedAt > now) {
+    return;
+  }
+
+  const transporter = getAlertTransporter(config);
+  const scorePercent = Math.round(clamp01(payload.score) * 100);
+  const timestampIso = new Date(payload.messageTs * 1000).toISOString();
+  const messageText =
+    payload.text.length > 4000 ? `${payload.text.slice(0, 4000)}\n...[truncated]` : payload.text;
+
+  await transporter.sendMail({
+    from: config.emailFrom,
+    to: config.emailTo.join(', '),
+    subject: `[Sentinel] ${payload.type.toUpperCase()} detected (${scorePercent}%)`,
+    text:
+      `Sentinel AI detected a threat.\n\n` +
+      `Type: ${payload.type}\n` +
+      `Score: ${scorePercent}%\n` +
+      `Time: ${timestampIso}\n` +
+      `Chat: ${payload.chat}\n` +
+      `Sender: ${payload.sender}\n` +
+      `Telegram chat ID: ${payload.telegramChatId ?? 'n/a'}\n` +
+      `Telegram message ID: ${payload.telegramMessageId ?? 'n/a'}\n\n` +
+      `Message:\n${messageText}`,
+    html:
+      `<p><strong>Sentinel AI detected a threat</strong></p>` +
+      `<p><strong>Type:</strong> ${escapeHtml(payload.type)}<br/>` +
+      `<strong>Score:</strong> ${scorePercent}%<br/>` +
+      `<strong>Time:</strong> ${escapeHtml(timestampIso)}<br/>` +
+      `<strong>Chat:</strong> ${escapeHtml(payload.chat)}<br/>` +
+      `<strong>Sender:</strong> ${escapeHtml(payload.sender)}<br/>` +
+      `<strong>Telegram chat ID:</strong> ${escapeHtml(payload.telegramChatId ?? 'n/a')}<br/>` +
+      `<strong>Telegram message ID:</strong> ${escapeHtml(String(payload.telegramMessageId ?? 'n/a'))}</p>` +
+      `<p><strong>Message</strong></p><pre>${escapeHtml(messageText)}</pre>`,
+  });
+  alertCooldownStore.set(cooldownKey, now + config.cooldownMs);
 }
 
 function parsePositiveInteger(value: string): number | null {
@@ -2809,6 +3009,19 @@ app.post('/api/start', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
         text,
         type: analysis.type,
         score: analysis.score,
+      });
+
+      void sendThreatAlertEmail({
+        type: analysis.type,
+        score: analysis.score,
+        text,
+        chat: chatTitle,
+        sender: senderName,
+        messageTs,
+        telegramChatId: chatId,
+        telegramMessageId: typeof message.id === 'number' && Number.isFinite(message.id) ? message.id : null,
+      }).catch((error) => {
+        console.error(`Failed to send threat alert email: ${(error as Error).message}`);
       });
     }, new NewMessage({ chats: eventChatFilter }));
     
