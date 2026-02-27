@@ -214,6 +214,30 @@ type AlertNotificationConfig = {
   minScore: number;
   cooldownMs: number;
 };
+type SmtpDiagnosticCheck = {
+  id: string;
+  status: 'ok' | 'warn' | 'error';
+  message: string;
+};
+type SmtpDiagnosticsResult = {
+  ok: boolean;
+  provider: 'google' | 'custom';
+  checkedAt: string;
+  checks: SmtpDiagnosticCheck[];
+  verification: {
+    attempted: boolean;
+    success: boolean;
+    latencyMs: number | null;
+    error: string | null;
+  };
+  testEmail: {
+    attempted: boolean;
+    recipient: string | null;
+    sent: boolean;
+    messageId: string | null;
+    error: string | null;
+  };
+};
 const RISK_CATEGORIES: RiskCategory[] = [
   'toxicity',
   'threat',
@@ -1227,7 +1251,7 @@ const DEFAULT_PERSISTED_SETTINGS: PersistedAppSettings = {
   keywordHitBoost: 16,
   criticalHitFloor: 84,
   alertingEnabled: false,
-  alertSmtpHost: '',
+  alertSmtpHost: 'smtp.gmail.com',
   alertSmtpPort: 587,
   alertSmtpSecure: false,
   alertSmtpUser: '',
@@ -1577,7 +1601,10 @@ function getAlertNotificationConfig(settings: PersistedAppSettings): AlertNotifi
   }
 
   const smtpHost = settings.alertSmtpHost.trim();
-  const emailFrom = settings.alertEmailFrom.trim();
+  const smtpUser = settings.alertSmtpUser.trim();
+  const emailFromRaw = settings.alertEmailFrom.trim();
+  const emailFrom =
+    emailFromRaw.length > 0 ? emailFromRaw : smtpUser.includes('@') ? smtpUser : '';
   const emailTo = normalizeEmailList(settings.alertEmailTo);
   if (!smtpHost || !emailFrom || emailTo.length === 0) {
     return null;
@@ -1587,13 +1614,43 @@ function getAlertNotificationConfig(settings: PersistedAppSettings): AlertNotifi
     smtpHost,
     smtpPort: settings.alertSmtpPort,
     smtpSecure: settings.alertSmtpSecure,
-    smtpUser: settings.alertSmtpUser.trim(),
+    smtpUser,
     smtpPass: settings.alertSmtpPass,
     emailFrom,
     emailTo,
     minScore: clamp01(settings.alertMinScore / 100),
     cooldownMs: Math.max(10_000, settings.alertCooldownSec * 1000),
   };
+}
+
+function isGoogleSmtpHost(value: string): boolean {
+  const host = value.trim().toLowerCase();
+  return host === 'smtp.gmail.com';
+}
+
+function createSmtpTransport(config: Pick<AlertNotificationConfig, 'smtpHost' | 'smtpPort' | 'smtpSecure' | 'smtpUser' | 'smtpPass'>): Transporter {
+  const auth =
+    config.smtpUser.length > 0
+      ? {
+          user: config.smtpUser,
+          pass: config.smtpPass,
+        }
+      : undefined;
+  const googleSmtp = isGoogleSmtpHost(config.smtpHost);
+  return nodemailer.createTransport({
+    host: config.smtpHost,
+    port: config.smtpPort,
+    secure: config.smtpSecure,
+    auth,
+    connectionTimeout: 15_000,
+    greetingTimeout: 12_000,
+    socketTimeout: 20_000,
+    requireTLS: googleSmtp ? true : undefined,
+    tls: {
+      minVersion: 'TLSv1.2',
+      servername: googleSmtp ? 'smtp.gmail.com' : undefined,
+    },
+  });
 }
 
 function getAlertTransporter(config: AlertNotificationConfig): Transporter {
@@ -1608,21 +1665,195 @@ function getAlertTransporter(config: AlertNotificationConfig): Transporter {
     return smtpTransportCache.transporter;
   }
 
-  const auth =
-    config.smtpUser.length > 0
-      ? {
-          user: config.smtpUser,
-          pass: config.smtpPass,
-        }
-      : undefined;
-  const transporter = nodemailer.createTransport({
-    host: config.smtpHost,
-    port: config.smtpPort,
-    secure: config.smtpSecure,
-    auth,
-  });
+  const transporter = createSmtpTransport(config);
   smtpTransportCache = { key: transportKey, transporter };
   return transporter;
+}
+
+function toSmtpDiagnosticErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const ext = error as Error & {
+      code?: unknown;
+      responseCode?: unknown;
+      command?: unknown;
+    };
+    const details: string[] = [];
+    if (typeof ext.code === 'string' && ext.code.length > 0) {
+      details.push(`code=${ext.code}`);
+    }
+    if (typeof ext.responseCode === 'number') {
+      details.push(`smtp=${ext.responseCode}`);
+    }
+    if (typeof ext.command === 'string' && ext.command.length > 0) {
+      details.push(`cmd=${ext.command}`);
+    }
+    return details.length > 0 ? `${error.message} (${details.join(', ')})` : error.message;
+  }
+  return String(error);
+}
+
+async function runSmtpDiagnostics(
+  settings: PersistedAppSettings,
+  options: { sendTestEmail: boolean; testRecipient: string }
+): Promise<SmtpDiagnosticsResult> {
+  const checks: SmtpDiagnosticCheck[] = [];
+  const addCheck = (id: string, status: 'ok' | 'warn' | 'error', message: string): void => {
+    checks.push({ id, status, message });
+  };
+
+  const smtpHost = settings.alertSmtpHost.trim();
+  const smtpPort = settings.alertSmtpPort;
+  const smtpSecure = settings.alertSmtpSecure;
+  const smtpUser = settings.alertSmtpUser.trim();
+  const smtpPass = settings.alertSmtpPass;
+  const emailFromRaw = settings.alertEmailFrom.trim();
+  const emailFrom = emailFromRaw.length > 0 ? emailFromRaw : smtpUser.includes('@') ? smtpUser : '';
+  const recipients = normalizeEmailList(settings.alertEmailTo);
+  const explicitRecipient = normalizeEmailList(options.testRecipient)[0] ?? null;
+  const diagnosticRecipient = explicitRecipient ?? recipients[0] ?? null;
+  const googleSmtp = isGoogleSmtpHost(smtpHost);
+
+  if (!smtpHost) {
+    addCheck('smtp-host', 'error', 'SMTP host is required.');
+  } else {
+    addCheck('smtp-host', 'ok', `SMTP host: ${smtpHost}`);
+  }
+
+  if (smtpPort < 1 || smtpPort > 65535) {
+    addCheck('smtp-port', 'error', 'SMTP port is out of range.');
+  } else {
+    addCheck('smtp-port', 'ok', `SMTP port: ${smtpPort}`);
+  }
+
+  if (smtpUser.length > 0 && smtpPass.length === 0) {
+    addCheck('smtp-auth', 'error', 'SMTP username is set but password is empty.');
+  } else if (smtpUser.length === 0 && smtpPass.length > 0) {
+    addCheck('smtp-auth', 'warn', 'SMTP password is set but username is empty.');
+  } else if (smtpUser.length > 0 && smtpPass.length > 0) {
+    addCheck('smtp-auth', 'ok', 'SMTP authentication is configured.');
+  } else {
+    addCheck('smtp-auth', 'warn', 'SMTP authentication is not configured.');
+  }
+
+  if (!emailFrom) {
+    addCheck('from-email', 'error', 'From email is required.');
+  } else {
+    addCheck('from-email', 'ok', `From email: ${emailFrom}`);
+  }
+
+  if (recipients.length === 0) {
+    addCheck('to-email', 'warn', 'Recipient list is empty. Alert emails will not be sent.');
+  } else {
+    addCheck('to-email', 'ok', `Recipients: ${recipients.length}`);
+  }
+
+  if (googleSmtp) {
+    if ((smtpPort === 587 && !smtpSecure) || (smtpPort === 465 && smtpSecure)) {
+      addCheck('google-preset', 'ok', 'Google SMTP port/security pair looks correct.');
+    } else {
+      addCheck(
+        'google-preset',
+        'warn',
+        'For Google SMTP use 587 + STARTTLS (secure off) or 465 + SSL/TLS (secure on).'
+      );
+    }
+    if (smtpUser.length === 0 || smtpPass.length === 0) {
+      addCheck(
+        'google-auth',
+        'error',
+        'Google SMTP requires account email and app password.'
+      );
+    } else if (smtpPass.replace(/\s+/g, '').length < 16) {
+      addCheck(
+        'google-auth',
+        'warn',
+        'Google app password usually has 16 characters.'
+      );
+    } else {
+      addCheck('google-auth', 'ok', 'Google SMTP authentication format looks valid.');
+    }
+  }
+
+  const verification = {
+    attempted: false,
+    success: false,
+    latencyMs: null as number | null,
+    error: null as string | null,
+  };
+  const testEmail = {
+    attempted: options.sendTestEmail,
+    recipient: diagnosticRecipient,
+    sent: false,
+    messageId: null as string | null,
+    error: null as string | null,
+  };
+
+  let transporter: Transporter | null = null;
+  if (smtpHost && smtpPort >= 1 && smtpPort <= 65535) {
+    verification.attempted = true;
+    const startedAt = Date.now();
+    try {
+      transporter = createSmtpTransport({
+        smtpHost,
+        smtpPort,
+        smtpSecure,
+        smtpUser,
+        smtpPass,
+      });
+      await transporter.verify();
+      verification.success = true;
+      verification.latencyMs = Date.now() - startedAt;
+      addCheck('smtp-verify', 'ok', `SMTP server accepted connection in ${verification.latencyMs} ms.`);
+    } catch (error) {
+      verification.success = false;
+      verification.latencyMs = Date.now() - startedAt;
+      verification.error = toSmtpDiagnosticErrorMessage(error);
+      addCheck('smtp-verify', 'error', `SMTP verify failed: ${verification.error}`);
+    }
+  }
+
+  if (options.sendTestEmail) {
+    if (!verification.success || !transporter) {
+      testEmail.error = 'Cannot send test email because SMTP verify failed.';
+      addCheck('smtp-test-send', 'error', testEmail.error);
+    } else if (!diagnosticRecipient) {
+      testEmail.error = 'Recipient email for test send is missing.';
+      addCheck('smtp-test-send', 'error', testEmail.error);
+    } else if (!emailFrom) {
+      testEmail.error = 'From email is required to send a test email.';
+      addCheck('smtp-test-send', 'error', testEmail.error);
+    } else {
+      try {
+        const info = await transporter.sendMail({
+          from: emailFrom,
+          to: diagnosticRecipient,
+          subject: '[Sentinel SMTP] Test message',
+          text:
+            `SMTP diagnostics completed successfully.\n\n` +
+            `Host: ${smtpHost}\n` +
+            `Port: ${smtpPort}\n` +
+            `Secure: ${smtpSecure ? 'yes' : 'no'}\n` +
+            `Time: ${new Date().toISOString()}\n`,
+        });
+        testEmail.sent = true;
+        testEmail.messageId = typeof info?.messageId === 'string' ? info.messageId : null;
+        addCheck('smtp-test-send', 'ok', `Test email sent to ${diagnosticRecipient}.`);
+      } catch (error) {
+        testEmail.error = toSmtpDiagnosticErrorMessage(error);
+        addCheck('smtp-test-send', 'error', `Test email send failed: ${testEmail.error}`);
+      }
+    }
+  }
+
+  const hasError = checks.some((check) => check.status === 'error');
+  return {
+    ok: !hasError && verification.success && (!options.sendTestEmail || testEmail.sent),
+    provider: googleSmtp ? 'google' : 'custom',
+    checkedAt: new Date().toISOString(),
+    checks,
+    verification,
+    testEmail,
+  };
 }
 
 function escapeHtml(value: string): string {
@@ -2295,6 +2526,12 @@ const RL_SETTINGS_SAVE = withRateLimit('settings_save', {
   cooldownMs: 20 * 1000,
   error: 'Too many settings save requests.',
 });
+const RL_SMTP_DIAGNOSTICS = withRateLimit('smtp_diagnostics', {
+  windowMs: 60 * 1000,
+  max: 12,
+  cooldownMs: 15 * 1000,
+  error: 'SMTP diagnostics cooldown is active.',
+});
 const RL_SESSION_REQUEST_CODE = withRateLimit('session_request_code', {
   windowMs: 10 * 60 * 1000,
   max: 2,
@@ -2432,6 +2669,27 @@ app.post('/api/settings', isAdmin, RL_SETTINGS_SAVE, (req, res) => {
   applyPersistedSettings(merged);
   savePersistedSettings(merged);
   res.json({ status: 'saved', settings: merged });
+});
+
+app.post('/api/alerts/smtp/diagnostics', isAdmin, RL_SMTP_DIAGNOSTICS, async (req, res) => {
+  const raw = typeof req.body === 'object' && req.body !== null ? (req.body as Record<string, unknown>) : {};
+  const settingsSource = raw.settings ?? raw;
+  const sendTestEmail = toBooleanValue(raw.sendTestEmail, false);
+  const testRecipient = toStringValue(raw.testRecipient, '').trim();
+  const diagnosticsSettings = sanitizePersistedSettings(settingsSource, persistedSettings);
+
+  try {
+    const diagnostics = await runSmtpDiagnostics(diagnosticsSettings, {
+      sendTestEmail,
+      testRecipient,
+    });
+    res.json(diagnostics);
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: `SMTP diagnostics failed: ${(error as Error).message}`,
+    });
+  }
 });
 
 app.post('/api/session/request-code', isAdmin, RL_SESSION_REQUEST_CODE, async (req, res) => {

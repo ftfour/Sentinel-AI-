@@ -4,7 +4,7 @@ import LoginPage from './LoginPage';
 import { 
   Shield, Activity, Settings, Terminal, Play, Square, 
   Plus, Trash2, Save, AlertTriangle, MessageSquare, FileText, RefreshCw,
-  Image as ImageIcon, Video, Link as LinkIcon, Globe, Lock, Database, Cpu
+  Image as ImageIcon, Video, Link as LinkIcon, Globe, Lock, Database, Cpu, Mail
 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend 
@@ -496,7 +496,31 @@ type PrivateRamReport = {
   summary: string;
 };
 type CooldownKey = 'saveSettings' | 'syncChats' | 'sessionCode' | 'sessionConfirm' | 'engineControl' | 'engineTest';
-type ActiveTab = 'dashboard' | 'dangers' | 'database' | 'agents' | 'engine' | 'engineTest' | 'proxy' | 'logs';
+type SmtpDiagnosticCheck = {
+  id: string;
+  status: 'ok' | 'warn' | 'error';
+  message: string;
+};
+type SmtpDiagnosticsResult = {
+  ok: boolean;
+  provider: 'google' | 'custom';
+  checkedAt: string;
+  checks: SmtpDiagnosticCheck[];
+  verification: {
+    attempted: boolean;
+    success: boolean;
+    latencyMs: number | null;
+    error: string | null;
+  };
+  testEmail: {
+    attempted: boolean;
+    recipient: string | null;
+    sent: boolean;
+    messageId: string | null;
+    error: string | null;
+  };
+};
+type ActiveTab = 'dashboard' | 'dangers' | 'database' | 'agents' | 'engine' | 'engineTest' | 'mail' | 'proxy' | 'logs';
 
 const DEFAULT_SETTINGS: SettingsState = {
   apiId: '',
@@ -539,7 +563,7 @@ const DEFAULT_SETTINGS: SettingsState = {
   keywordHitBoost: 16,
   criticalHitFloor: 84,
   alertingEnabled: false,
-  alertSmtpHost: '',
+  alertSmtpHost: 'smtp.gmail.com',
   alertSmtpPort: 587,
   alertSmtpSecure: false,
   alertSmtpUser: '',
@@ -715,6 +739,9 @@ function SentinelApp() {
   const [engineTestUsedDefaultSet, setEngineTestUsedDefaultSet] = useState(false);
   const [engineTestPreset, setEngineTestPreset] = useState<EngineSelfTestPreset>('all');
   const [engineTestUsedPreset, setEngineTestUsedPreset] = useState<EngineSelfTestPreset | 'custom'>('all');
+  const [smtpDiagnostics, setSmtpDiagnostics] = useState<SmtpDiagnosticsResult | null>(null);
+  const [isRunningSmtpDiagnostics, setIsRunningSmtpDiagnostics] = useState(false);
+  const [smtpTestRecipient, setSmtpTestRecipient] = useState('');
   const selectedModel = MODEL_OPTIONS.find((model) => model.id === settings.mlModel) ?? MODEL_OPTIONS[0];
   const selectedEnginePreset =
     ENGINE_SELF_TEST_PRESET_OPTIONS.find((preset) => preset.id === engineTestPreset) ??
@@ -1491,6 +1518,57 @@ function SentinelApp() {
     }
   };
 
+  const applyGoogleSmtpPreset = (): void => {
+    setSettings((prev) => ({
+      ...prev,
+      alertSmtpHost: 'smtp.gmail.com',
+      alertSmtpPort: prev.alertSmtpSecure ? 465 : 587,
+      alertSmtpUser: prev.alertSmtpUser.trim(),
+      alertEmailFrom: prev.alertEmailFrom.trim(),
+    }));
+  };
+
+  const runSmtpDiagnostics = async (sendTestEmail = false): Promise<void> => {
+    if (!user || user.role !== 'admin') return;
+    setIsRunningSmtpDiagnostics(true);
+
+    try {
+      const res = await fetch('/api/alerts/smtp/diagnostics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          settings: toPersistedSettingsPayload(settings),
+          sendTestEmail,
+          testRecipient: smtpTestRecipient.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        const cooldownSeconds = extractCooldownSeconds(res, data);
+        if (cooldownSeconds > 0) {
+          alert(`SMTP diagnostics cooldown: ${cooldownSeconds}s`);
+          return;
+        }
+        throw new Error(data?.error ?? 'Failed to run SMTP diagnostics');
+      }
+
+      setSmtpDiagnostics(data as SmtpDiagnosticsResult);
+      if (sendTestEmail) {
+        if (data?.testEmail?.sent) {
+          alert('Test email sent successfully.');
+        } else {
+          alert(data?.testEmail?.error ?? 'Test email failed. See diagnostics for details.');
+        }
+      }
+    } catch (err) {
+      console.error('Failed to run SMTP diagnostics', err);
+      alert(`SMTP diagnostics failed: ${(err as Error).message}`);
+    } finally {
+      setIsRunningSmtpDiagnostics(false);
+    }
+  };
+
   const toggleEngine = async () => {
     if (!user || user.role !== 'admin') return;
     if (cooldowns.engineControl > 0) {
@@ -2228,7 +2306,7 @@ function SentinelApp() {
     );
   };
 
-  const renderSettings = (section: 'agents' | 'engine' | 'engineTest' | 'proxy') => {
+  const renderSettings = (section: 'agents' | 'engine' | 'engineTest' | 'mail' | 'proxy') => {
     if (user.role !== 'admin') return null;
     return (
       <div className="space-y-6 animate-in fade-in duration-300 max-w-5xl mx-auto pb-12">
@@ -2374,7 +2452,7 @@ function SentinelApp() {
           </>
         )}
 
-        {(section === 'agents' || section === 'engine') && (
+        {(section === 'agents' || section === 'engine' || section === 'mail') && (
           <div className={cn("grid gap-6", section === 'agents' ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1")}>
           {section === 'agents' && (
           <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden flex flex-col">
@@ -2948,7 +3026,7 @@ function SentinelApp() {
         </div>
         )}
 
-        {(section === 'engine' || section === 'engineTest') && (
+        {(section === 'engine' || section === 'engineTest' || section === 'mail') && (
         <div className="space-y-6">
           {section === 'engine' && (
           <>
@@ -3196,11 +3274,16 @@ function SentinelApp() {
             </div>
           </div>
 
+          </>
+          )}
+
+          {section === 'mail' && (
+          <>
           <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between">
               <div className="flex items-center">
-                <AlertTriangle className="w-5 h-5 mr-3 text-amber-400" />
-                <h3 className="text-sm font-semibold text-slate-200">SMTP Alerts</h3>
+                <Mail className="w-5 h-5 mr-3 text-amber-400" />
+                <h3 className="text-sm font-semibold text-slate-200">Почта и SMTP-оповещения</h3>
               </div>
               <label className="flex items-center cursor-pointer">
                 <div className="relative">
@@ -3213,13 +3296,23 @@ function SentinelApp() {
                   <div className={cn("block w-10 h-6 rounded-full transition-colors", settings.alertingEnabled ? "bg-amber-500" : "bg-slate-700")}></div>
                   <div className={cn("dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform", settings.alertingEnabled ? "transform translate-x-4" : "")}></div>
                 </div>
-                <span className="ml-3 text-sm font-medium text-slate-300">Enable email alerts</span>
+                <span className="ml-3 text-sm font-medium text-slate-300">Включить email-оповещения</span>
               </label>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-xs text-slate-400">
-                When enabled, Sentinel sends an email if a message is classified as dangerous and score is above the configured threshold.
-              </p>
+              <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div className="text-xs text-slate-300 leading-relaxed">
+                  Для Google SMTP: `smtp.gmail.com`, порт `587`, secure `off`, логин - Gmail, пароль - App Password.
+                </div>
+                <button
+                  type="button"
+                  onClick={applyGoogleSmtpPreset}
+                  className="px-3 py-2 rounded-lg border border-amber-500/20 text-amber-300 text-xs hover:bg-amber-500/10 transition-colors"
+                >
+                  Применить Google SMTP
+                </button>
+              </div>
+
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">SMTP host</label>
@@ -3228,7 +3321,7 @@ function SentinelApp() {
                     value={settings.alertSmtpHost}
                     onChange={(e) => setSettings((prev) => ({ ...prev, alertSmtpHost: e.target.value }))}
                     className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
-                    placeholder="smtp.example.com"
+                    placeholder="smtp.gmail.com"
                   />
                 </div>
                 <div className="space-y-2">
@@ -3254,11 +3347,11 @@ function SentinelApp() {
                     value={settings.alertSmtpUser}
                     onChange={(e) => setSettings((prev) => ({ ...prev, alertSmtpUser: e.target.value }))}
                     className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
-                    placeholder="alerts@example.com"
+                    placeholder="your-account@gmail.com"
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">SMTP password</label>
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">SMTP password / App Password</label>
                   <input
                     type="password"
                     value={settings.alertSmtpPass}
@@ -3273,7 +3366,7 @@ function SentinelApp() {
                     value={settings.alertEmailFrom}
                     onChange={(e) => setSettings((prev) => ({ ...prev, alertEmailFrom: e.target.value }))}
                     className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
-                    placeholder="sentinel@example.com"
+                    placeholder="your-account@gmail.com"
                   />
                 </div>
                 <div className="space-y-2">
@@ -3283,7 +3376,7 @@ function SentinelApp() {
                     value={settings.alertEmailTo}
                     onChange={(e) => setSettings((prev) => ({ ...prev, alertEmailTo: e.target.value }))}
                     className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
-                    placeholder="ops@example.com, admin@example.com"
+                    placeholder="ops@example.com, security@example.com"
                   />
                 </div>
               </div>
@@ -3294,7 +3387,23 @@ function SentinelApp() {
                   <input
                     type="checkbox"
                     checked={settings.alertSmtpSecure}
-                    onChange={() => setSettings((prev) => ({ ...prev, alertSmtpSecure: !prev.alertSmtpSecure }))}
+                    onChange={() =>
+                      setSettings((prev) => {
+                        const nextSecure = !prev.alertSmtpSecure;
+                        const normalizedHost = prev.alertSmtpHost.trim().toLowerCase();
+                        const nextPort =
+                          normalizedHost === 'smtp.gmail.com'
+                            ? nextSecure
+                              ? 465
+                              : 587
+                            : prev.alertSmtpPort;
+                        return {
+                          ...prev,
+                          alertSmtpSecure: nextSecure,
+                          alertSmtpPort: nextPort,
+                        };
+                      })
+                    }
                     className="h-4 w-4 accent-amber-500"
                   />
                 </label>
@@ -3334,6 +3443,116 @@ function SentinelApp() {
             </div>
           </div>
 
+          <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between">
+              <div className="flex items-center">
+                <Terminal className="w-5 h-5 mr-3 text-sky-400" />
+                <h3 className="text-sm font-semibold text-slate-200">Диагностика SMTP</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void runSmtpDiagnostics(false)}
+                  disabled={isRunningSmtpDiagnostics}
+                  className={cn(
+                    "px-3 py-2 rounded-lg border text-xs transition-colors",
+                    isRunningSmtpDiagnostics
+                      ? "border-slate-700 text-slate-500 cursor-not-allowed"
+                      : "border-sky-500/20 text-sky-300 hover:bg-sky-500/10"
+                  )}
+                >
+                  {isRunningSmtpDiagnostics ? 'Проверка...' : 'Проверить SMTP'}
+                </button>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                <div className="lg:col-span-2 space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Email для тестового письма (опционально)</label>
+                  <input
+                    type="email"
+                    value={smtpTestRecipient}
+                    onChange={(e) => setSmtpTestRecipient(e.target.value)}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-sky-500"
+                    placeholder="leave empty to use first recipient from settings"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Тест отправки</label>
+                  <button
+                    type="button"
+                    onClick={() => void runSmtpDiagnostics(true)}
+                    disabled={isRunningSmtpDiagnostics}
+                    className={cn(
+                      "w-full px-3 py-2.5 rounded-lg border text-sm transition-colors",
+                      isRunningSmtpDiagnostics
+                        ? "border-slate-700 text-slate-500 cursor-not-allowed"
+                        : "border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/10"
+                    )}
+                  >
+                    Отправить тестовое письмо
+                  </button>
+                </div>
+              </div>
+
+              {smtpDiagnostics ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
+                      <div className="text-xs text-slate-500 uppercase tracking-wider">Статус</div>
+                      <div className={cn("text-sm font-medium mt-1", smtpDiagnostics.ok ? "text-emerald-300" : "text-red-300")}>
+                        {smtpDiagnostics.ok ? 'OK' : 'Ошибки'}
+                      </div>
+                    </div>
+                    <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
+                      <div className="text-xs text-slate-500 uppercase tracking-wider">Провайдер</div>
+                      <div className="text-sm text-slate-200 mt-1">{smtpDiagnostics.provider === 'google' ? 'Google SMTP' : 'Custom SMTP'}</div>
+                    </div>
+                    <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
+                      <div className="text-xs text-slate-500 uppercase tracking-wider">Verify</div>
+                      <div className={cn("text-sm mt-1", smtpDiagnostics.verification.success ? "text-emerald-300" : "text-red-300")}>
+                        {smtpDiagnostics.verification.success
+                          ? `OK${typeof smtpDiagnostics.verification.latencyMs === 'number' ? ` (${smtpDiagnostics.verification.latencyMs} ms)` : ''}`
+                          : 'Fail'}
+                      </div>
+                    </div>
+                    <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
+                      <div className="text-xs text-slate-500 uppercase tracking-wider">Тест отправки</div>
+                      <div className={cn("text-sm mt-1", smtpDiagnostics.testEmail.sent ? "text-emerald-300" : "text-slate-300")}>
+                        {smtpDiagnostics.testEmail.attempted
+                          ? smtpDiagnostics.testEmail.sent
+                            ? 'Отправлено'
+                            : 'Не отправлено'
+                          : 'Не запускался'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3 space-y-2">
+                    {smtpDiagnostics.checks.map((check) => (
+                      <div key={check.id} className="flex items-start gap-2 text-xs">
+                        <span
+                          className={cn(
+                            "mt-0.5 w-2 h-2 rounded-full",
+                            check.status === 'ok'
+                              ? "bg-emerald-400"
+                              : check.status === 'warn'
+                                ? "bg-amber-400"
+                                : "bg-red-400"
+                          )}
+                        />
+                        <span className="text-slate-300 break-words">{check.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-slate-500">
+                  Запустите проверку SMTP, чтобы увидеть диагностику подключения и рекомендации.
+                </div>
+              )}
+            </div>
+          </div>
           </>
           )}
 
@@ -3573,6 +3792,15 @@ function SentinelApp() {
                 <Terminal className="w-4 h-4 mr-3" /> {'\u0422\u0435\u0441\u0442 \u0434\u0432\u0438\u0436\u043a\u0430'}
               </button>
               <button
+                onClick={() => setActiveTab('mail')}
+                className={cn(
+                  "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  activeTab === 'mail' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                )}
+              >
+                <Mail className="w-4 h-4 mr-3" /> {'\u041f\u043e\u0447\u0442\u0430 / SMTP'}
+              </button>
+              <button
                 onClick={() => setActiveTab('proxy')}
                 className={cn(
                   "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
@@ -3626,6 +3854,7 @@ function SentinelApp() {
               agents: '\u0410\u0433\u0435\u043d\u0442\u044b',
               engine: '\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430 \u0434\u0432\u0438\u0436\u043a\u0430',
               engineTest: '\u0422\u0435\u0441\u0442 \u0434\u0432\u0438\u0436\u043a\u0430',
+              mail: '\u041f\u043e\u0447\u0442\u0430 / SMTP',
               proxy: '\u041f\u0440\u043e\u043a\u0441\u0438',
               logs: '\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u0436\u0443\u0440\u043d\u0430\u043b\u044b',
             }[activeTab]}
@@ -3670,6 +3899,7 @@ function SentinelApp() {
           {activeTab === 'agents' && renderSettings('agents')}
           {activeTab === 'engine' && renderSettings('engine')}
           {activeTab === 'engineTest' && renderSettings('engineTest')}
+          {activeTab === 'mail' && renderSettings('mail')}
           {activeTab === 'proxy' && renderSettings('proxy')}
           {activeTab === 'logs' && (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-4">
