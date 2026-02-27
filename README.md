@@ -1,52 +1,125 @@
 ﻿# Sentinel AI RU
 
-Sentinel AI RU is a full-stack Telegram monitoring dashboard prototype.
-The app runs as a single Node.js process that serves:
+Sentinel AI RU - full-stack ÑÐ¸ÑÑ‚ÐµÐ¼Ð° Ð¼Ð¾Ð½Ð¸Ñ‚Ð¾Ñ€Ð¸Ð½Ð³Ð° Telegram Ñ Ð²ÐµÐ±-Ð¿Ð°Ð½ÐµÐ»ÑŒÑŽ, Ð°Ð½Ð°Ð»Ð¸Ð·Ð¾Ð¼ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹ Ð¿Ð¾ ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸ÑÐ¼ Ñ€Ð¸ÑÐºÐ° Ð¸ Ð¸Ð½ÑÑ‚Ñ€ÑƒÐ¼ÐµÐ½Ñ‚Ð°Ð¼Ð¸ Ð¿Ð¾Ð´Ð³Ð¾Ñ‚Ð¾Ð²ÐºÐ¸ Ð¾Ñ‚Ñ‡ÐµÑ‚Ð¾Ð².
+
+ÐŸÑ€Ð¸Ð»Ð¾Ð¶ÐµÐ½Ð¸Ðµ Ð·Ð°Ð¿ÑƒÑÐºÐ°ÐµÑ‚ÑÑ ÐºÐ°Ðº Ð¾Ð´Ð¸Ð½ Node.js Ð¿Ñ€Ð¾Ñ†ÐµÑÑ Ð¸ Ð¾Ð±ÑÐ»ÑƒÐ¶Ð¸Ð²Ð°ÐµÑ‚:
 - frontend (React + Vite),
 - backend API (Express),
-- Telegram listener control endpoints.
+- Telegram Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸ÑŽ (bot Ð¸ user session),
+- Ñ…Ñ€Ð°Ð½ÐµÐ½Ð¸Ðµ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹ (SQLite + RAM Ñ€ÐµÐ¶Ð¸Ð¼ Ð´Ð»Ñ Ð¿Ñ€Ð¸Ð²Ð°Ñ‚Ð½Ñ‹Ñ… Ñ‡Ð°Ñ‚Ð¾Ð²).
 
-## Features
+## ÐžÑÐ½Ð¾Ð²Ð½Ñ‹Ðµ Ð²Ð¾Ð·Ð¼Ð¾Ð¶Ð½Ð¾ÑÑ‚Ð¸
 
-- Role-based login (`admin`, `viewer`)
-- Start/stop monitoring from UI
-- Recent messages and threat stats
-- API for engine status and telemetry
+- Ð Ð¾Ð»Ð¸: `admin` Ð¸ `viewer`
+- Ð£Ð¿Ñ€Ð°Ð²Ð»ÐµÐ½Ð¸Ðµ Ð´Ð²Ð¸Ð¶ÐºÐ¾Ð¼ Ð¼Ð¾Ð½Ð¸Ñ‚Ð¾Ñ€Ð¸Ð½Ð³Ð° (ÑÑ‚Ð°Ñ€Ñ‚/ÑÑ‚Ð¾Ð¿, ÑÑ‚Ð°Ñ‚ÑƒÑ, ÑÑ‚Ð°Ñ‚Ð¸ÑÑ‚Ð¸ÐºÐ°)
+- ÐžÑ‚Ð´ÐµÐ»ÑŒÐ½Ð°Ñ Ð²ÐºÐ»Ð°Ð´ÐºÐ° "ÐžÐ¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸" Ñ ÑÐ²Ð½Ñ‹Ð¼Ð¸ ÑƒÐ³Ñ€Ð¾Ð·Ð°Ð¼Ð¸
+- ÐžÑ‚Ð´ÐµÐ»ÑŒÐ½Ð°Ñ Ð²ÐºÐ»Ð°Ð´ÐºÐ° "Ð¢ÐµÑÑ‚ Ð´Ð²Ð¸Ð¶ÐºÐ°" Ñ Ñ€ÑƒÑÑÐºÐ¸Ð¼Ð¸ Ñ‚ÐµÑÑ‚-ÐºÐµÐ¹ÑÐ°Ð¼Ð¸ Ð¿Ð¾ ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸ÑÐ¼
+- Ð’ÐºÐ»Ð°Ð´ÐºÐ° "Ð£Ð¿Ñ€Ð°Ð²Ð»ÐµÐ½Ð¸Ðµ Ð‘Ð”" (ÑÑ‚Ð°Ñ‚ÑƒÑ, Ð¾Ñ‡Ð¸ÑÑ‚ÐºÐ°, vacuum)
+- Ð’ÐºÐ»Ð°Ð´ÐºÐ° "ÐŸÐ¾Ñ‡Ñ‚Ð° / SMTP" (Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ°, Ð´Ð¸Ð°Ð³Ð½Ð¾ÑÑ‚Ð¸ÐºÐ°, Ñ‚ÐµÑÑ‚Ð¾Ð²Ð¾Ðµ Ð¿Ð¸ÑÑŒÐ¼Ð¾)
+- Ð’ÐºÐ»Ð°Ð´ÐºÐ° "Ð ÐµÐ¶Ð¸Ð¼ Ð¾Ñ‡ÐºÐ¾Ð²" Ð´Ð»Ñ Ð¿Ñ€Ð¸Ð²Ð°Ñ‚Ð½Ñ‹Ñ…/Ð·Ð°ÐºÑ€Ñ‹Ñ‚Ñ‹Ñ… Ñ‡Ð°Ñ‚Ð¾Ð² Ñ Ñ…Ñ€Ð°Ð½ÐµÐ½Ð¸ÐµÐ¼ Ð² RAM
+- Ð’ÐºÐ»Ð°Ð´ÐºÐ° "ÐŸÐ¾Ð´Ð³Ð¾Ñ‚Ð¾Ð²ÐºÐ° Ð¾Ñ‚Ñ‡ÐµÑ‚Ð°" Ð¸ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²ÐºÐ° Ð¾Ñ‚Ñ‡ÐµÑ‚Ð° Ð½Ð° email Ñ‡ÐµÑ€ÐµÐ· SMTP
+- ÐŸÐ°Ð³Ð¸Ð½Ð°Ñ†Ð¸Ñ Ð² Ñ€ÐµÐ¶Ð¸Ð¼Ðµ Ð¾Ñ‡ÐºÐ¾Ð² Ñ Ð´Ð¾Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐ¾Ð¹ Ð±ÐµÐ· Ð¶ÐµÑÑ‚ÐºÐ¾Ð³Ð¾ Ð¾Ð±Ñ‰ÐµÐ³Ð¾ Ð»Ð¸Ð¼Ð¸Ñ‚Ð° Ð¸ flood control
 
-## Stack
+## Ð’ÐºÐ»Ð°Ð´ÐºÐ¸ Ð¸Ð½Ñ‚ÐµÑ€Ñ„ÐµÐ¹ÑÐ°
+
+- `ÐŸÐ°Ð½ÐµÐ»ÑŒ`
+- `ÐžÐ¿Ð°ÑÐ½Ð¾ÑÑ‚Ð¸`
+- `ÐÐ³ÐµÐ½Ñ‚Ñ‹`
+- `ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ° Ð´Ð²Ð¸Ð¶ÐºÐ°`
+- `Ð¢ÐµÑÑ‚ Ð´Ð²Ð¸Ð¶ÐºÐ°`
+- `Ð ÐµÐ¶Ð¸Ð¼ Ð¾Ñ‡ÐºÐ¾Ð²`
+- `ÐŸÐ¾Ð´Ð³Ð¾Ñ‚Ð¾Ð²ÐºÐ° Ð¾Ñ‚Ñ‡ÐµÑ‚Ð°`
+- `ÐŸÐ¾Ñ‡Ñ‚Ð° / SMTP`
+- `ÐŸÑ€Ð¾ÐºÑÐ¸`
+- `Ð£Ð¿Ñ€Ð°Ð²Ð»ÐµÐ½Ð¸Ðµ Ð‘Ð”`
+- `Ð¡Ð¸ÑÑ‚ÐµÐ¼Ð½Ñ‹Ðµ Ð¶ÑƒÑ€Ð½Ð°Ð»Ñ‹`
+
+## ÐœÐ¾Ð´ÐµÐ»ÑŒ Ñ…Ñ€Ð°Ð½ÐµÐ½Ð¸Ñ Ð´Ð°Ð½Ð½Ñ‹Ñ…
+
+- SQLite Ð‘Ð”: `.runtime/messages.sqlite3`
+  - ÑÑŽÐ´Ð° ÑÐ¾Ñ…Ñ€Ð°Ð½ÑÑŽÑ‚ÑÑ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ Ð¸Ð· Ð¿ÑƒÐ±Ð»Ð¸Ñ‡Ð½Ñ‹Ñ…/Ð¾Ñ‚ÐºÑ€Ñ‹Ñ‚Ñ‹Ñ… Ñ‡Ð°Ñ‚Ð¾Ð².
+- RAM Ñ€ÐµÐ¶Ð¸Ð¼ ("Ð ÐµÐ¶Ð¸Ð¼ Ð¾Ñ‡ÐºÐ¾Ð²"):
+  - Ð¿Ñ€Ð¸Ð²Ð°Ñ‚Ð½Ñ‹Ðµ/Ð·Ð°ÐºÑ€Ñ‹Ñ‚Ñ‹Ðµ Ñ‡Ð°Ñ‚Ñ‹ Ñ…Ñ€Ð°Ð½ÑÑ‚ÑÑ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð² Ð¿Ð°Ð¼ÑÑ‚Ð¸ Ð¿Ñ€Ð¾Ñ†ÐµÑÑÐ° (Ð±ÐµÐ· Ð·Ð°Ð¿Ð¸ÑÐ¸ Ð² SQLite),
+  - Ð´Ð°Ð½Ð½Ñ‹Ðµ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ñ‹ Ð´Ð»Ñ Ð¾Ð¿ÐµÑ€Ð°Ñ‚Ð¸Ð²Ð½Ð¾Ð³Ð¾ Ð°Ð½Ð°Ð»Ð¸Ð·Ð° Ð¸ Ð¿Ð¾Ð´Ð³Ð¾Ñ‚Ð¾Ð²ÐºÐ¸ Ð¾Ñ‚Ñ‡ÐµÑ‚Ð°,
+  - Ð¿Ñ€Ð¸ Ð¿ÐµÑ€ÐµÐ·Ð°Ð¿ÑƒÑÐºÐµ Ð¿Ñ€Ð¾Ñ†ÐµÑÑÐ° RAM-Ð´Ð°Ð½Ð½Ñ‹Ðµ Ñ‚ÐµÑ€ÑÑŽÑ‚ÑÑ.
+- ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ¸ Ð°Ð´Ð¼Ð¸Ð½ÐºÐ¸: `.runtime/admin-settings.json`
+
+## ÐšÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸Ð¸ Ñ€Ð¸ÑÐºÐ° Ð¸ Ð¿Ð¾Ñ€Ð¾Ð³Ð¸ Ð¿Ð¾ ÑƒÐ¼Ð¾Ð»Ñ‡Ð°Ð½Ð¸ÑŽ
+
+- `toxicity`: `72%`
+- `threat`: `72%`
+- `scam`: `70%`
+- `recruitment`: `74%`
+- `drugs`: `74%`
+- `terrorism`: `76%`
+
+ÐšÐ»Ð°ÑÑÐ¸Ñ„Ð¸ÐºÐ°Ñ†Ð¸Ñ ÑÑ‚Ñ€Ð¾Ð¸Ñ‚ÑÑ Ð½Ð° ÑÐ¾Ñ‡ÐµÑ‚Ð°Ð½Ð¸Ð¸ ML-Ð¼Ð¾Ð´ÐµÐ»Ð¸ Ð¸ ÑÐ²Ñ€Ð¸ÑÑ‚Ð¸Ðº/Ñ‚Ñ€Ð¸Ð³Ð³ÐµÑ€Ð¾Ð². Ð’ "Ð¢ÐµÑÑ‚Ðµ Ð´Ð²Ð¸Ð¶ÐºÐ°" Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÑŽÑ‚ÑÑ Ñ€ÑƒÑÑÐºÐ¸Ðµ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ Ð¿Ð¾ ÐºÐ°Ð¶Ð´Ð¾Ð¹ ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸Ð¸.
+
+## API (ÐºÑ€Ð°Ñ‚ÐºÐ¾)
+
+ÐÑƒÑ‚ÐµÐ½Ñ‚Ð¸Ñ„Ð¸ÐºÐ°Ñ†Ð¸Ñ:
+- `POST /api/login`
+- `POST /api/logout`
+- `GET /api/user`
+
+ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ¸ Ð¸ SMTP:
+- `GET /api/settings` (admin)
+- `POST /api/settings` (admin)
+- `POST /api/alerts/smtp/diagnostics` (admin)
+- `POST /api/reports/email` (admin)
+
+Telegram user session:
+- `POST /api/session/request-code` (admin)
+- `POST /api/session/complete` (admin)
+- `POST /api/telegram/chats` (admin)
+
+Ð”Ð²Ð¸Ð¶Ð¾Ðº Ð¸ Ð¼Ð¾Ð½Ð¸Ñ‚Ð¾Ñ€Ð¸Ð½Ð³:
+- `POST /api/engine/test` (admin)
+- `POST /api/start` (admin)
+- `POST /api/stop` (admin)
+- `GET /api/status`
+- `GET /api/messages`
+- `GET /api/stats`
+- `GET /api/dangers`
+
+Ð‘Ð°Ð·Ð° Ð´Ð°Ð½Ð½Ñ‹Ñ…:
+- `GET /api/db/status` (admin)
+- `POST /api/db/clear` (admin)
+- `POST /api/db/vacuum` (admin)
+
+RAM Ñ€ÐµÐ¶Ð¸Ð¼ Ð¾Ñ‡ÐºÐ¾Ð²:
+- `GET /api/user/private-chats` (admin)
+- `GET /api/user/private-chats/:chatId/messages` (admin)
+- `POST /api/user/chats/:chatId/analyze` (admin)
+- `POST /api/user/private-chats/:chatId/scan` (admin)
+
+## Ð¡Ñ‚ÐµÐº
 
 - Node.js 22 + TypeScript
 - Express + express-session + cors
-- React 19 + react-router-dom
-- Vite 6 + Tailwind
+- React 19 + Vite 6 + Tailwind
 - Telegram client (`telegram`)
+- SQLite (`better-sqlite3`)
+- SMTP (`nodemailer`)
 
-## Structure
+## Ð¢Ñ€ÐµÐ±Ð¾Ð²Ð°Ð½Ð¸Ñ
 
-```text
-.
-|-- .github/workflows/deploy.yml
-|-- ecosystem.config.cjs
-|-- server.ts
-|-- src/
-|-- package.json
-`-- .env.example
-```
+- Node.js `22.x`
+- npm `10+`
 
-## Environment Variables
+## ÐŸÐµÑ€ÐµÐ¼ÐµÐ½Ð½Ñ‹Ðµ Ð¾ÐºÑ€ÑƒÐ¶ÐµÐ½Ð¸Ñ
 
-Create `.env` using `.env.example`.
+Ð¡Ð¾Ð·Ð´Ð°Ð¹Ñ‚Ðµ `.env` Ð½Ð° Ð¾ÑÐ½Ð¾Ð²Ðµ `.env.example`.
 
-- `NODE_ENV` - use `production` on server
-- `PORT` - app port, default `3000`
-- `SESSION_SECRET` - session cookie secret
-- `ADMIN_PASSWORD` - password for `admin`
-- `VIEWER_PASSWORD` - password for `viewer`
-- `APP_URL` - optional app URL metadata
+- `APP_URL` - URL Ð¿Ñ€Ð¸Ð»Ð¾Ð¶ÐµÐ½Ð¸Ñ (Ð¾Ð¿Ñ†Ð¸Ð¾Ð½Ð°Ð»ÑŒÐ½Ð¾)
+- `NODE_ENV` - Ð¾Ð±Ñ‹Ñ‡Ð½Ð¾ `production` Ð½Ð° ÑÐµÑ€Ð²ÐµÑ€Ðµ
+- `PORT` - Ð¿Ð¾Ñ€Ñ‚ Ð¿Ñ€Ð¸Ð»Ð¾Ð¶ÐµÐ½Ð¸Ñ (Ð¿Ð¾ ÑƒÐ¼Ð¾Ð»Ñ‡Ð°Ð½Ð¸ÑŽ `3000`)
+- `SESSION_SECRET` - ÑÐµÐºÑ€ÐµÑ‚ ÑÐµÑÑÐ¸Ð¹
+- `ADMIN_PASSWORD` - Ð¿Ð°Ñ€Ð¾Ð»ÑŒ Ð°Ð´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€Ð°
+- `VIEWER_PASSWORD` - Ð¿Ð°Ñ€Ð¾Ð»ÑŒ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ Ð¿Ñ€Ð¾ÑÐ¼Ð¾Ñ‚Ñ€Ð°
+- `PRIVATE_RAM_MESSAGES_PER_CHAT_LIMIT` - Ð¾Ð¿Ñ†Ð¸Ð¾Ð½Ð°Ð»ÑŒÐ½Ñ‹Ð¹ Ð»Ð¸Ð¼Ð¸Ñ‚ RAM-ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹ Ð½Ð° Ñ‡Ð°Ñ‚ (`0` = Ð±ÐµÐ· Ð»Ð¸Ð¼Ð¸Ñ‚Ð°)
 
-Admin panel settings (tokens, chat list, model, threshold) are persisted on server in `.runtime/admin-settings.json`.
-
-## Local Run
+## Ð›Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ð¹ Ð·Ð°Ð¿ÑƒÑÐº
 
 ```bash
 npm ci
@@ -54,9 +127,17 @@ cp .env.example .env
 npm run dev
 ```
 
-Open `http://localhost:3000`
+ÐžÑ‚ÐºÑ€Ð¾Ð¹Ñ‚Ðµ `http://localhost:3000`.
 
-## Manual Production Run
+Ð”Ð»Ñ Windows PowerShell:
+
+```powershell
+npm ci
+Copy-Item .env.example .env
+npm run dev
+```
+
+## ÐŸÑ€Ð¾Ð´Ð°ÐºÑˆÐµÐ½ Ð·Ð°Ð¿ÑƒÑÐº
 
 ```bash
 npm ci
@@ -64,91 +145,56 @@ npm run build
 NODE_ENV=production npm run start
 ```
 
-## NPM Scripts
+## NPM scripts
 
-- `npm run dev` - dev mode (`tsx server.ts` + Vite middleware)
-- `npm run start` - server start (`tsx server.ts`)
-- `npm run build` - frontend build to `dist`
-- `npm run lint` - TypeScript type check
-- `npm run preview` - Vite preview
+- `npm run dev` - Ð·Ð°Ð¿ÑƒÑÐº ÑÐµÑ€Ð²ÐµÑ€Ð° Ð² dev-Ñ€ÐµÐ¶Ð¸Ð¼Ðµ (`tsx server.ts`)
+- `npm run start` - Ð·Ð°Ð¿ÑƒÑÐº ÑÐµÑ€Ð²ÐµÑ€Ð°
+- `npm run build` - ÑÐ±Ð¾Ñ€ÐºÐ° frontend Ð² `dist`
+- `npm run preview` - preview Vite-ÑÐ±Ð¾Ñ€ÐºÐ¸
+- `npm run lint` - Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ° TypeScript (`tsc --noEmit`)
 
-## API
+## SMTP Ð¸ Google SMTP
 
-- `POST /api/login`
-- `POST /api/logout`
-- `GET /api/user`
-- `POST /api/start` (admin only)
-- `POST /api/stop` (admin only)
-- `GET /api/status`
-- `GET /api/messages`
-- `GET /api/stats`
+Ð ÐµÐºÐ¾Ð¼ÐµÐ½Ð´ÑƒÐµÐ¼Ñ‹Ðµ Ð¿Ð°Ñ€Ð°Ð¼ÐµÑ‚Ñ€Ñ‹ Ð´Ð»Ñ Google:
+- `host`: `smtp.gmail.com`
+- `port`: `587` + `secure: off` (STARTTLS)  
+  Ð¸Ð»Ð¸ `465` + `secure: on` (SSL/TLS)
+- Ð»Ð¾Ð³Ð¸Ð½: Ð°Ð´Ñ€ÐµÑ Gmail
+- Ð¿Ð°Ñ€Ð¾Ð»ÑŒ: App Password
 
-## Threat Models In Admin Panel
+Ð¡ÐµÑ€Ð²ÐµÑ€Ð½Ð°Ñ Ð´Ð¸Ð°Ð³Ð½Ð¾ÑÑ‚Ð¸ÐºÐ° SMTP Ð¿Ð¾Ð´Ð´ÐµÑ€Ð¶Ð¸Ð²Ð°ÐµÑ‚:
+- Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÑƒ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð¾ÑÑ‚Ð¸ ÑÐµÑ€Ð²ÐµÑ€Ð°,
+- Ð´Ð¸Ð°Ð³Ð½Ð¾ÑÑ‚Ð¸Ñ‡ÐµÑÐºÐ¸Ðµ Ð¿Ð¾Ð´ÑÐºÐ°Ð·ÐºÐ¸,
+- fallback Ð½Ð° IPv4,
+- fallback Ð¿Ð¾ TLS-Ñ€ÐµÐ¶Ð¸Ð¼Ñƒ Ð¿Ñ€Ð¸ Ð½ÐµÑÐ¾Ð¾Ñ‚Ð²ÐµÑ‚ÑÑ‚Ð²Ð¸Ð¸ `secure`/`port`.
 
-Admin panel now includes local ONNX model profiles:
-- `local/rubert-tiny-balanced`
-- `local/rubert-tiny-quantized`
-- `local/rubert-tiny-fp16`
+## Deploy (GitHub Actions)
 
-Message confidence percentages are calculated from model output (or heuristic fallback).
-Models are downloaded once and cached in `.cache/models` on the server.
+Workflow: `.github/workflows/deploy.yml`
 
-## Deploy From GitHub To Server
+ÐÐ²Ñ‚Ð¾Ð´ÐµÐ¿Ð»Ð¾Ð¹ Ð·Ð°Ð¿ÑƒÑÐºÐ°ÐµÑ‚ÑÑ Ð¿Ñ€Ð¸:
+- `push` Ð² Ð²ÐµÑ‚ÐºÑƒ `main`
+- Ñ€ÑƒÑ‡Ð½Ð¾Ð¼ Ð·Ð°Ð¿ÑƒÑÐºÐµ `workflow_dispatch`
 
-CI/CD workflow is implemented in [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml).
+ÐšÐ°Ðº Ð¾Ð±Ð½Ð¾Ð²Ð»ÑÑ‚ÑŒ README Ð±ÐµÐ· Ð´ÐµÐ¿Ð»Ð¾Ñ:
+1. Ð Ð°Ð±Ð¾Ñ‚Ð°Ð¹Ñ‚Ðµ Ð² Ð¾Ñ‚Ð´ÐµÐ»ÑŒÐ½Ð¾Ð¹ Ð²ÐµÑ‚ÐºÐµ (Ð½Ðµ `main`).
+2. ÐÐµ Ð·Ð°Ð¿ÑƒÑÐºÐ°Ð¹Ñ‚Ðµ workflow Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ.
+3. ÐÐµ Ð´ÐµÐ»Ð°Ð¹Ñ‚Ðµ `push` Ð² `main`.
 
-Flow:
-1. Push to `main`
-2. GitHub Actions builds project
-3. Workflow connects to VPS over SSH
-4. Runs `git pull`, `npm ci`, `npm run build`
-5. Restarts app with PM2 (`pm2 startOrReload`)
-
-### 1) One-Time Server Bootstrap (Ubuntu)
+ÐŸÑ€Ð¸Ð¼ÐµÑ€:
 
 ```bash
-sudo apt update
-sudo apt install -y curl git nginx build-essential
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install -y nodejs
-sudo npm i -g pm2
-mkdir -p /opt/sentinel-ai-ru
+git checkout -b docs/readme-update
+git add README.md
+git commit -m "docs: update README"
+git push -u origin docs/readme-update
 ```
-
-### 2) Create `.env` On Server
-
-```bash
-cd /opt/sentinel-ai-ru
-cp .env.example .env
-nano .env
-```
-
-Required values:
-- `SESSION_SECRET`
-- `ADMIN_PASSWORD`
-- `VIEWER_PASSWORD`
-- optional `PORT`
-
-### 3) Add GitHub Repository Secrets
-
-Go to `Settings -> Secrets and variables -> Actions` and add:
-
-- `DEPLOY_HOST` - server IP or domain
-- `DEPLOY_USER` - SSH user
-- `DEPLOY_SSH_KEY` - private SSH key (multiline)
-- `DEPLOY_PORT` - SSH port (usually `22`)
-- `APP_DIR` - app directory on server (example `/opt/sentinel-ai-ru`)
-
-### 4) Trigger Deploy
-
-- push to `main`, or
-- run manually: `Actions -> Deploy To Server -> Run workflow`
 
 ## PM2
 
-PM2 config: [`ecosystem.config.cjs`](./ecosystem.config.cjs)
+ÐšÐ¾Ð½Ñ„Ð¸Ð³: `ecosystem.config.cjs`
 
-Useful server commands:
+ÐŸÐ¾Ð»ÐµÐ·Ð½Ñ‹Ðµ ÐºÐ¾Ð¼Ð°Ð½Ð´Ñ‹:
 
 ```bash
 pm2 status
@@ -156,38 +202,3 @@ pm2 logs sentinel-ai-ru
 pm2 restart sentinel-ai-ru
 pm2 save
 ```
-
-## Nginx Reverse Proxy
-
-```nginx
-server {
-  listen 80;
-  server_name your-domain.com;
-
-  location / {
-    proxy_pass http://127.0.0.1:3000;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-  }
-}
-```
-
-Apply config:
-
-```bash
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-## Production Improvements Included
-
-- `PORT` is read from env
-- `SESSION_SECRET` is read from env
-- secure cookies enabled in production
-- SPA fallback for React routes is enabled
-- auto deploy workflow from GitHub is added
