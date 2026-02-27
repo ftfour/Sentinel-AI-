@@ -923,6 +923,7 @@ function PublicThreatBoard() {
   const safeMessages = dangerMessages.filter((message) => message.type === 'safe');
   const nonSafeMessages = dangerMessages.filter((message) => message.type !== 'safe');
   const sortedAllMessages = [...dangerMessages].sort((left, right) => right.id - left.id);
+  const sortedNonSafeMessages = sortedAllMessages.filter((message) => message.type !== 'safe');
   const rankedCategories = (['safe', 'threat', 'scam', 'toxicity', 'recruitment', 'drugs', 'terrorism'] as ThreatLabel[])
     .map((type) => ({ type, value: numberOrFallback(stats[type], 0) }))
     .sort((left, right) => right.value - left.value);
@@ -1091,17 +1092,17 @@ function PublicThreatBoard() {
             <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/20 flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-200 flex items-center">
                 <AlertTriangle className="w-4 h-4 mr-2 text-red-400" />
-                Явные угрозы
+                Все типы угроз (кроме safe)
               </h3>
-              <span className="text-xs font-mono text-red-300">{explicitThreats.length}</span>
+              <span className="text-xs font-mono text-red-300">{sortedNonSafeMessages.length}</span>
             </div>
             <div className="p-4 space-y-3 max-h-[620px] overflow-y-auto custom-scrollbar">
               {isLoading ? (
                 <div className="text-sm text-slate-500 py-10 text-center">Загрузка данных...</div>
-              ) : explicitThreats.length === 0 ? (
-                <div className="text-sm text-slate-500 py-10 text-center">Явные угрозы пока не обнаружены</div>
+              ) : sortedNonSafeMessages.length === 0 ? (
+                <div className="text-sm text-slate-500 py-10 text-center">Опасные сообщения пока не обнаружены</div>
               ) : (
-                explicitThreats.map(renderDangerItem)
+                sortedNonSafeMessages.map(renderDangerItem)
               )}
             </div>
           </div>
