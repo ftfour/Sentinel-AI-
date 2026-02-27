@@ -329,6 +329,10 @@ type PrivateRamThreatReport = {
   }>;
   summary: string;
 };
+type UserChatAnalyzedMessage = PrivateRamMessage & {
+  heuristicScores: PrivateRamRiskScores;
+  modelScores: PrivateRamRiskScores;
+};
 type LabelScore = { label: string; score: number };
 type LocalOnnxOptions = {
   model_file_name?: string;
@@ -701,6 +705,36 @@ function buildPrivateRamThreatReport(chatState: PrivateRamChatState): PrivateRam
     topThreats,
     summary,
   };
+}
+
+function buildThreatReportForMessages(params: {
+  chatId: string;
+  chat: string;
+  username: string | null;
+  type: TelegramChatSummary['type'];
+  visibility: TelegramChatSummary['visibility'];
+  messages: PrivateRamMessage[];
+}): PrivateRamThreatReport {
+  const state: PrivateRamChatState = {
+    chatId: params.chatId,
+    chat: params.chat,
+    username: params.username,
+    type: params.type,
+    visibility: params.visibility,
+    points: 0,
+    stats: emptyThreatStats(),
+    messages: [...params.messages].sort((left, right) => left.messageTs - right.messageTs),
+    updatedAt: Date.now(),
+  };
+
+  for (const message of state.messages) {
+    state.stats[message.threatType] += 1;
+    if (message.threatType !== 'safe') {
+      state.points += Math.max(1, Math.round(message.score * 100));
+    }
+  }
+
+  return buildPrivateRamThreatReport(state);
 }
 
 function upsertPrivateRamMessage(entry: {
@@ -2623,6 +2657,12 @@ const RL_PRIVATE_RAM_SCAN = withRateLimit('private_ram_scan', {
   cooldownMs: 20 * 1000,
   error: 'Private chat scan cooldown is active.',
 });
+const RL_USER_CHAT_ANALYZE = withRateLimit('user_chat_analyze', {
+  windowMs: 60 * 1000,
+  max: 8,
+  cooldownMs: 20 * 1000,
+  error: 'Telegram chat analysis cooldown is active.',
+});
 
 // --- AUTH API ---
 app.post('/api/login', RL_LOGIN, (req, res) => {
@@ -3855,6 +3895,159 @@ app.get('/api/user/private-chats/:chatId/messages', isAdmin, RL_PRIVATE_RAM_LIST
     return res.status(404).json({ error: 'Chat is not present in RAM memory yet' });
   }
   res.json(payload);
+});
+
+app.post('/api/user/chats/:chatId/analyze', isAdmin, RL_USER_CHAT_ANALYZE, async (req, res) => {
+  const requestedChatId = decodeURIComponent(toStringValue(req.params?.chatId, '')).trim();
+  if (!requestedChatId) {
+    return res.status(400).json({ error: 'chatId is required' });
+  }
+
+  if (persistedSettings.authMode !== 'user') {
+    return res.status(400).json({ error: 'Switch auth mode to Telegram user session to analyze chats.' });
+  }
+
+  const apiId = parsePositiveInteger(persistedSettings.apiId);
+  const apiHash = persistedSettings.apiHash.trim();
+  const sessionString = persistedSettings.sessionString.trim();
+  if (!apiId || !apiHash || !sessionString) {
+    return res.status(400).json({ error: 'API ID, API Hash and Session String are required for Telegram user mode.' });
+  }
+
+  const limitRaw = Number(req.body?.limit ?? 80);
+  const limit = Number.isFinite(limitRaw) ? Math.min(250, Math.max(1, Math.floor(limitRaw))) : 80;
+
+  const reuseRunningClient =
+    !!client &&
+    isRunning &&
+    runtimeAuthMode === 'user' &&
+    persistedSettings.apiId === String(apiId) &&
+    persistedSettings.apiHash === apiHash &&
+    persistedSettings.sessionString === sessionString;
+
+  try {
+    const payload = await runWithUserSessionClient(
+      {
+        apiId,
+        apiHash,
+        sessionString,
+      },
+      reuseRunningClient,
+      async (clientRef) => {
+        const entity = await clientRef.getEntity(requestedChatId);
+        const normalizedChatId = String(await clientRef.getPeerId(entity as any));
+        const chatType = resolveEntityChatType(entity);
+        const chatUsername = resolveEntityChatUsername(entity);
+        const chatTitle = resolveEntityChatTitle(entity, normalizedChatId);
+        const visibility = resolveChatVisibility(chatType, chatUsername);
+        const storageMode = resolveChatStorageMode('user', chatType, chatUsername);
+
+        const history = await clientRef.getMessages(entity as any, { limit });
+        const sourceMessages = Array.isArray(history) ? [...history].reverse() : [];
+        const analyzedMessages: UserChatAnalyzedMessage[] = [];
+        const reportMessages: PrivateRamMessage[] = [];
+
+        for (const telegramMessage of sourceMessages) {
+          const text = extractTelegramMessageText(telegramMessage);
+          if (!text || text.trim().length === 0) {
+            continue;
+          }
+
+          const messageTs =
+            typeof telegramMessage?.date === 'number' && Number.isFinite(telegramMessage.date)
+              ? Math.floor(telegramMessage.date)
+              : Math.floor(Date.now() / 1000);
+          const senderName = await resolveTelegramMessageSenderName(telegramMessage);
+          const analysis = await analyzeThreatDetailed(text);
+          const telegramMessageId =
+            typeof telegramMessage?.id === 'number' && Number.isFinite(telegramMessage.id)
+              ? telegramMessage.id
+              : null;
+
+          const messageForReport: PrivateRamMessage =
+            storageMode === 'ram'
+              ? upsertPrivateRamMessage({
+                  telegramMessageId,
+                  chatId: normalizedChatId,
+                  chat: chatTitle,
+                  username: chatUsername,
+                  type: chatType,
+                  visibility,
+                  sender: senderName,
+                  text,
+                  messageTs,
+                  source: 'scan',
+                  threatType: analysis.type,
+                  score: analysis.score,
+                  scores: analysis.scores,
+                  thresholds: analysis.thresholds,
+                })
+              : {
+                  id: `${normalizedChatId}:${telegramMessageId ?? randomUUID()}`,
+                  telegramMessageId,
+                  chatId: normalizedChatId,
+                  chat: chatTitle,
+                  username: chatUsername,
+                  type: chatType,
+                  visibility,
+                  sender: senderName,
+                  text,
+                  messageTs,
+                  time: new Date(messageTs * 1000).toLocaleTimeString(),
+                  source: 'scan',
+                  threatType: analysis.type,
+                  score: clamp01(analysis.score),
+                  scores: toPrivateRamRiskScores(analysis.scores),
+                  thresholds: toPrivateRamRiskScores(analysis.thresholds),
+                };
+
+          reportMessages.push(messageForReport);
+          analyzedMessages.push({
+            ...messageForReport,
+            heuristicScores: toPrivateRamRiskScores(analysis.heuristicScores),
+            modelScores: toPrivateRamRiskScores(analysis.modelScores),
+          });
+        }
+
+        const report =
+          storageMode === 'ram'
+            ? readPrivateRamMessages(normalizedChatId, 250)?.report ??
+              buildThreatReportForMessages({
+                chatId: normalizedChatId,
+                chat: chatTitle,
+                username: chatUsername,
+                type: chatType,
+                visibility,
+                messages: reportMessages,
+              })
+            : buildThreatReportForMessages({
+                chatId: normalizedChatId,
+                chat: chatTitle,
+                username: chatUsername,
+                type: chatType,
+                visibility,
+                messages: reportMessages,
+              });
+
+        return {
+          chat: buildChatSummary('user', {
+            id: normalizedChatId,
+            title: chatTitle,
+            username: chatUsername,
+            type: chatType,
+            avatar: null,
+          }),
+          scanned: analyzedMessages.length,
+          messages: analyzedMessages.sort((left, right) => right.messageTs - left.messageTs).slice(0, 250),
+          report,
+        };
+      }
+    );
+
+    res.json(payload);
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
+  }
 });
 
 app.post('/api/user/private-chats/:chatId/scan', isAdmin, RL_PRIVATE_RAM_SCAN, async (req, res) => {
