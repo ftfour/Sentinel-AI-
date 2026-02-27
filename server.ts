@@ -11,6 +11,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import { env as hfEnv, pipeline } from '@huggingface/transformers';
+import Database from 'better-sqlite3';
 
 // Define a custom session type
 declare module 'express-session' {
@@ -31,6 +32,7 @@ const __dirname = path.dirname(__filename);
 const MODEL_CACHE_DIR = path.resolve(__dirname, '.cache', 'models');
 const RUNTIME_DIR = path.resolve(__dirname, '.runtime');
 const SETTINGS_FILE = path.join(RUNTIME_DIR, 'admin-settings.json');
+const MESSAGES_DB_FILE = path.join(RUNTIME_DIR, 'messages.sqlite3');
 type UserRole = 'admin' | 'viewer';
 type UserStore = Record<string, { password: string; role: UserRole }>;
 type TelegramAuthMode = 'bot' | 'user';
@@ -171,16 +173,6 @@ const rateLimitStore = new Map<string, RateLimitEntry>();
 
 let client: TelegramClient | null = null;
 let isRunning = false;
-let recentMessages: any[] = [];
-let threatStats = {
-  safe: 0,
-  toxicity: 0,
-  threat: 0,
-  scam: 0,
-  recruitment: 0,
-  drugs: 0,
-  terrorism: 0,
-};
 const MAX_RECENT_MESSAGES = 300;
 type ThreatType =
   | 'safe'
@@ -207,6 +199,28 @@ type AnalyzeThreatResult = {
   heuristicScores: RiskScores;
   modelScores: RiskScores;
   thresholds: RiskScores;
+};
+type StoredThreatStats = Record<ThreatType, number>;
+type StoredMessageRow = {
+  id: number;
+  telegramMessageId: number | null;
+  telegramChatId: string | null;
+  messageTs: number;
+  chat: string;
+  sender: string;
+  text: string;
+  type: ThreatType;
+  score: number;
+};
+type StoredMessageInput = {
+  telegramMessageId: number | null;
+  telegramChatId: string | null;
+  messageTs: number;
+  chat: string;
+  sender: string;
+  text: string;
+  type: ThreatType;
+  score: number;
 };
 type LabelScore = { label: string; score: number };
 type LocalOnnxOptions = {
@@ -238,6 +252,145 @@ type ThreatModelConfig = {
     terrorism: string[];
   };
 };
+
+const THREAT_TYPES: ThreatType[] = [
+  'safe',
+  'toxicity',
+  'threat',
+  'scam',
+  'recruitment',
+  'drugs',
+  'terrorism',
+];
+
+const messageDb = new Database(MESSAGES_DB_FILE);
+messageDb.pragma('journal_mode = WAL');
+messageDb.pragma('synchronous = NORMAL');
+messageDb.exec(`
+  CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_message_id INTEGER,
+    telegram_chat_id TEXT,
+    message_ts INTEGER NOT NULL,
+    received_ts INTEGER NOT NULL,
+    chat TEXT NOT NULL,
+    sender TEXT NOT NULL,
+    text TEXT NOT NULL,
+    type TEXT NOT NULL,
+    score REAL NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_messages_received_ts ON messages(received_ts DESC);
+  CREATE INDEX IF NOT EXISTS idx_messages_type ON messages(type);
+`);
+
+const insertMessageStmt = messageDb.prepare(`
+  INSERT INTO messages (
+    telegram_message_id,
+    telegram_chat_id,
+    message_ts,
+    received_ts,
+    chat,
+    sender,
+    text,
+    type,
+    score
+  ) VALUES (
+    @telegramMessageId,
+    @telegramChatId,
+    @messageTs,
+    @receivedTs,
+    @chat,
+    @sender,
+    @text,
+    @type,
+    @score
+  )
+`);
+
+const selectRecentMessagesStmt = messageDb.prepare(`
+  SELECT
+    id,
+    telegram_message_id AS telegramMessageId,
+    telegram_chat_id AS telegramChatId,
+    message_ts AS messageTs,
+    chat,
+    sender,
+    text,
+    type,
+    score
+  FROM messages
+  ORDER BY received_ts DESC
+  LIMIT ?
+`);
+
+const selectThreatStatsStmt = messageDb.prepare(`
+  SELECT type, COUNT(*) AS total
+  FROM messages
+  GROUP BY type
+`);
+
+function storeMessage(entry: StoredMessageInput): void {
+  try {
+    insertMessageStmt.run({
+      telegramMessageId: entry.telegramMessageId,
+      telegramChatId: entry.telegramChatId,
+      messageTs: Number.isFinite(entry.messageTs) ? Math.max(0, Math.floor(entry.messageTs)) : Math.floor(Date.now() / 1000),
+      receivedTs: Date.now(),
+      chat: entry.chat,
+      sender: entry.sender,
+      text: entry.text,
+      type: entry.type,
+      score: clamp01(entry.score),
+    });
+  } catch (error) {
+    console.error(`Failed to store message in DB: ${(error as Error).message}`);
+  }
+}
+
+function readRecentMessages(limit = MAX_RECENT_MESSAGES): Array<{
+  id: number;
+  time: string;
+  chat: string;
+  sender: string;
+  text: string;
+  type: ThreatType;
+  score: number;
+}> {
+  const safeLimit = Math.min(1000, Math.max(1, Math.floor(limit)));
+  const rows = selectRecentMessagesStmt.all(safeLimit) as StoredMessageRow[];
+  return rows.map((row) => {
+    const messageTs = Number.isFinite(row.messageTs) ? row.messageTs : Math.floor(Date.now() / 1000);
+    const messageType = THREAT_TYPES.includes(row.type as ThreatType) ? (row.type as ThreatType) : 'safe';
+    return {
+      id: row.id,
+      time: new Date(messageTs * 1000).toLocaleTimeString(),
+      chat: row.chat,
+      sender: row.sender,
+      text: row.text,
+      type: messageType,
+      score: clamp01(row.score),
+    };
+  });
+}
+
+function readThreatStats(): StoredThreatStats {
+  const base: StoredThreatStats = {
+    safe: 0,
+    toxicity: 0,
+    threat: 0,
+    scam: 0,
+    recruitment: 0,
+    drugs: 0,
+    terrorism: 0,
+  };
+  const rows = selectThreatStatsStmt.all() as Array<{ type: string; total: number }>;
+  for (const row of rows) {
+    if (THREAT_TYPES.includes(row.type as ThreatType)) {
+      base[row.type as ThreatType] = Number(row.total) || 0;
+    }
+  }
+  return base;
+}
 
 const MODEL_CONFIGS: Record<string, ThreatModelConfig> = {
   'local/rubert-tiny-balanced': {
@@ -2494,21 +2647,26 @@ app.post('/api/start', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
       
       const chat = await message.getChat();
       const chatTitle = chat && 'title' in chat ? chat.title : 'Unknown Chat';
+      const chatId =
+        chat && typeof chat === 'object' && 'id' in chat && (chat as any).id !== undefined
+          ? String((chat as any).id)
+          : null;
+      const messageTs =
+        typeof message.date === 'number' && Number.isFinite(message.date)
+          ? Math.floor(message.date)
+          : Math.floor(Date.now() / 1000);
       
       const analysis = await analyzeThreat(text);
-      threatStats[analysis.type as keyof typeof threatStats]++;
-      
-      recentMessages.unshift({
-        id: message.id,
-        time: new Date(message.date * 1000).toLocaleTimeString(),
+      storeMessage({
+        telegramMessageId: typeof message.id === 'number' && Number.isFinite(message.id) ? message.id : null,
+        telegramChatId: chatId,
+        messageTs,
         chat: chatTitle,
         sender: senderName,
         text,
         type: analysis.type,
-        score: analysis.score
+        score: analysis.score,
       });
-      
-      if (recentMessages.length > MAX_RECENT_MESSAGES) recentMessages.pop();
     }, new NewMessage({ chats: eventChatFilter }));
     
     res.json({
@@ -2540,11 +2698,13 @@ app.get('/api/status', isAuthenticated, RL_STATUS, (req, res) => {
 });
 
 app.get('/api/messages', isAuthenticated, RL_MESSAGES, (req, res) => {
-  res.json(recentMessages);
+  const limitRaw = Number(req.query?.limit ?? MAX_RECENT_MESSAGES);
+  const limit = Number.isFinite(limitRaw) ? Math.floor(limitRaw) : MAX_RECENT_MESSAGES;
+  res.json(readRecentMessages(limit));
 });
 
 app.get('/api/stats', isAuthenticated, RL_STATS, (req, res) => {
-  res.json(threatStats);
+  res.json(readThreatStats());
 });
 
 async function startServer() {
