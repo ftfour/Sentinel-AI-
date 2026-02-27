@@ -9,6 +9,7 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import dns from 'node:dns';
 import { fileURLToPath } from 'url';
 import { env as hfEnv, pipeline } from '@huggingface/transformers';
 import Database from 'better-sqlite3';
@@ -155,6 +156,11 @@ fs.mkdirSync(MODEL_CACHE_DIR, { recursive: true });
 fs.mkdirSync(RUNTIME_DIR, { recursive: true });
 hfEnv.cacheDir = MODEL_CACHE_DIR;
 hfEnv.allowLocalModels = true;
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch (error) {
+  console.warn(`Failed to set DNS result order to ipv4first: ${(error as Error).message}`);
+}
 
 app.set('trust proxy', 1);
 app.use(cors());
@@ -1809,6 +1815,13 @@ async function runSmtpDiagnostics(
       verification.latencyMs = Date.now() - startedAt;
       verification.error = toSmtpDiagnosticErrorMessage(error);
       addCheck('smtp-verify', 'error', `SMTP verify failed: ${verification.error}`);
+      if (verification.error.includes('ENETUNREACH')) {
+        addCheck(
+          'smtp-network',
+          'warn',
+          'Server cannot reach SMTP over IPv6 route. IPv4-first DNS is enabled; restart service and check outbound 587/465 firewall rules.'
+        );
+      }
     }
   }
 
