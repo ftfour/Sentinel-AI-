@@ -88,13 +88,13 @@ const THREAT_COLORS = {
   terrorism: '#dc2626', // red-600
 };
 const THREAT_LABELS = {
-  safe: 'Ð‘ÐµÐ·Ð¾Ð¿Ð°ÑÐ½Ð¾',
-  toxicity: 'Ð¢Ð¾ÐºÑÐ¸Ñ‡Ð½Ð¾ÑÑ‚ÑŒ',
-  threat: 'Ð£Ð³Ñ€Ð¾Ð·Ð°',
-  scam: 'Ð¡ÐºÐ°Ð¼',
-  recruitment: 'Ð’ÐµÑ€Ð±Ð¾Ð²ÐºÐ°',
-  drugs: 'ÐÐ°Ñ€ÐºÐ¾Ñ‚Ð¸ÐºÐ¸',
-  terrorism: 'Ð¢ÐµÑ€Ñ€Ð¾Ñ€Ð¸Ð·Ð¼',
+  safe: 'Безопасно',
+  toxicity: 'Токсичность',
+  threat: 'Угроза',
+  scam: 'Скам',
+  recruitment: 'Вербовка',
+  drugs: 'Наркотики',
+  terrorism: 'Терроризм',
 } as const;
 
 type ModelOption = {
@@ -156,39 +156,39 @@ const MODEL_OPTIONS: ModelOption[] = [
 ];
 
 const DEFAULT_SCAM_TRIGGERS = [
-  'ÑÐºÐ°Ð¼',
-  'Ð¼Ð¾ÑˆÐµÐ½Ð½Ð¸Ðº',
-  'Ð¼Ð¾ÑˆÐµÐ½Ð½Ð¸Ñ‡ÐµÑÑ‚Ð²Ð¾',
-  'Ñ€Ð°Ð·Ð²Ð¾Ð´',
-  'Ð¾Ð±Ð¼Ð°Ð½',
-  'Ñ„Ð¸ÑˆÐ¸Ð½Ð³',
-  'Ð±Ñ‹ÑÑ‚Ñ€Ñ‹Ð¹ Ð·Ð°Ñ€Ð°Ð±Ð¾Ñ‚Ð¾Ðº',
-  'Ð³Ð°Ñ€Ð°Ð½Ñ‚Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ Ð´Ð¾Ñ…Ð¾Ð´',
-  'Ð¿Ð°ÑÑÐ¸Ð²Ð½Ñ‹Ð¹ Ð´Ð¾Ñ…Ð¾Ð´',
-  'Ð¿ÐµÑ€ÐµÐ²ÐµÐ´Ð¸ usdt',
+  'скам',
+  'мошенник',
+  'мошенничество',
+  'развод',
+  'обман',
+  'фишинг',
+  'быстрый заработок',
+  'гарантированный доход',
+  'пассивный доход',
+  'переведи usdt',
   'seed phrase',
-  'ÑÐ¸Ð´ Ñ„Ñ€Ð°Ð·Ð°',
+  'сид фраза',
   'wallet connect',
-  'Ð¿Ñ€ÐµÐ´Ð¾Ð¿Ð»Ð°Ñ‚Ð°',
-  'Ð°Ñ€Ð±Ð¸Ñ‚Ñ€Ð°Ð¶',
-  'Ð¸Ð½Ð²ÐµÑÑ‚Ð¸Ñ€ÑƒÐ¹ ÑÐµÐ¹Ñ‡Ð°Ñ',
+  'предоплата',
+  'арбитраж',
+  'инвестируй сейчас',
 ];
 const DEFAULT_DRUG_TRIGGERS = [
-  'Ð½Ð°Ñ€ÐºÐ¾Ñ‚Ð¸Ðº',
-  'Ð½Ð°Ñ€ÐºÐ¾Ñ‚Ð°',
-  'Ð·Ð°ÐºÐ»Ð°Ð´ÐºÐ°',
-  'ÐºÐ»Ð°Ð´Ð¼ÐµÐ½',
-  'Ð¼ÐµÑ„',
-  'Ð¼ÐµÑ„ÐµÐ´Ñ€Ð¾Ð½',
-  'Ð°Ð¼Ñ„',
-  'Ð°Ð¼Ñ„ÐµÑ‚Ð°Ð¼Ð¸Ð½',
-  'ÐºÐ¾ÐºÐ°Ð¸Ð½',
-  'Ð³ÐµÑ€Ð¾Ð¸Ð½',
-  'Ð¼Ð°Ñ€Ð¸Ñ…ÑƒÐ°Ð½Ð°',
-  'ÑÐ¿Ð°Ð¹Ñ',
-  'ÑÐ¾Ð»ÑŒ',
+  'наркотик',
+  'наркота',
+  'закладка',
+  'кладмен',
+  'меф',
+  'мефедрон',
+  'амф',
+  'амфетамин',
+  'кокаин',
+  'героин',
+  'марихуана',
+  'спайс',
+  'соль',
   'mdma',
-  'ÑÐºÑÑ‚Ð°Ð·Ð¸',
+  'экстази',
 ];
 const DEFAULT_RECRUITMENT_TRIGGERS = [
   'recruit',
@@ -211,28 +211,28 @@ const DEFAULT_TERRORISM_TRIGGERS = [
   'maximum damage',
 ];
 const DEFAULT_THREAT_TRIGGERS = [
-  'ÑƒÐ±ÑŒÑŽ',
-  'Ð²Ð·Ð¾Ñ€Ð²Ñƒ',
-  'Ð·Ð°Ñ€ÐµÐ¶Ñƒ',
-  'Ñ€Ð°ÑÑÑ‚Ñ€ÐµÐ»ÑÑŽ',
-  'ÑÐ¼ÐµÑ€Ñ‚ÑŒ',
-  'Ð±Ð¾Ð¼Ð±Ð°',
-  'Ð¾Ñ€ÑƒÐ¶Ð¸Ðµ',
-  'ÑƒÐ³Ñ€Ð¾Ð·Ð°',
-  'Ñ‚ÐµÑ€Ð°ÐºÑ‚',
-  'Ð½Ð°Ð¿Ð°Ð´Ñƒ',
+  'убью',
+  'взорву',
+  'зарежу',
+  'расстреляю',
+  'смерть',
+  'бомба',
+  'оружие',
+  'угроза',
+  'теракт',
+  'нападу',
 ];
 const DEFAULT_TOXICITY_TRIGGERS = [
-  'Ð¸Ð´Ð¸Ð¾Ñ‚',
-  'Ð´ÐµÐ±Ð¸Ð»',
-  'Ñ‚Ð²Ð°Ñ€ÑŒ',
-  'Ð¼Ñ€Ð°Ð·ÑŒ',
-  'Ñ‡Ð¼Ð¾',
-  'ÑÑƒÐºÐ°',
-  'ÑƒÑ€Ð¾Ð´',
-  'Ð¿Ð¸Ð´Ð¾Ñ€',
-  'Ð¾ÑÐºÐ¾Ñ€Ð±Ð»ÐµÐ½Ð¸Ðµ',
-  'Ð½ÐµÐ½Ð°Ð²Ð¸Ð¶Ñƒ',
+  'идиот',
+  'дебил',
+  'тварь',
+  'мразь',
+  'чмо',
+  'сука',
+  'урод',
+  'пидор',
+  'оскорбление',
+  'ненавижу',
 ];
 
 const ENGINE_RISK_KEYS: Array<keyof EngineRiskScores> = [
@@ -260,77 +260,77 @@ const ENGINE_SELF_TEST_PRESET_OPTIONS: Array<{
 }> = [
   {
     id: 'all',
-    label: 'Ð’ÑÐµ ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸Ð¸',
-    description: 'Ð—Ð°Ð¿ÑƒÑÐºÐ°ÐµÑ‚ Ð²ÑÑ‚Ñ€Ð¾ÐµÐ½Ð½Ñ‹Ð¹ Ñ€ÑƒÑÑÐºÐ¾ÑÐ·Ñ‹Ñ‡Ð½Ñ‹Ð¹ Ð½Ð°Ð±Ð¾Ñ€ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹ Ð¿Ð¾ Ð²ÑÐµÐ¼ ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸ÑÐ¼.',
+    label: 'Все категории',
+    description: 'Запускает встроенный русскоязычный набор сообщений по всем категориям.',
   },
   {
     id: 'toxicity',
-    label: 'Ð¢Ð¾ÐºÑÐ¸Ñ‡Ð½Ð¾ÑÑ‚ÑŒ',
-    description: 'ÐžÑÐºÐ¾Ñ€Ð±Ð»ÐµÐ½Ð¸Ñ Ð¸ ÑƒÐ½Ð¸Ð¶Ð°ÑŽÑ‰Ð¸Ðµ Ñ„Ð¾Ñ€Ð¼ÑƒÐ»Ð¸Ñ€Ð¾Ð²ÐºÐ¸.',
+    label: 'Токсичность',
+    description: 'Оскорбления и унижающие формулировки.',
   },
   {
     id: 'threat',
-    label: 'Ð£Ð³Ñ€Ð¾Ð·Ñ‹',
-    description: 'ÐŸÑ€ÑÐ¼Ñ‹Ðµ ÑƒÐ³Ñ€Ð¾Ð·Ñ‹ Ð½Ð°ÑÐ¸Ð»Ð¸Ñ Ð¸ Ð¿Ñ€Ð¸Ñ‡Ð¸Ð½ÐµÐ½Ð¸Ñ Ð²Ñ€ÐµÐ´Ð°.',
+    label: 'Угрозы',
+    description: 'Прямые угрозы насилия и причинения вреда.',
   },
   {
     id: 'scam',
-    label: 'ÐœÐ¾ÑˆÐµÐ½Ð½Ð¸Ñ‡ÐµÑÑ‚Ð²Ð¾',
-    description: 'ÐžÐ±Ð¼Ð°Ð½, Ð¿Ñ€ÐµÐ´Ð¾Ð¿Ð»Ð°Ñ‚Ð° Ð¸ Ð¾Ð±ÐµÑ‰Ð°Ð½Ð¸Ñ Ð³Ð°Ñ€Ð°Ð½Ñ‚Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ð¾Ð¹ Ð¿Ñ€Ð¸Ð±Ñ‹Ð»Ð¸.',
+    label: 'Мошенничество',
+    description: 'Обман, предоплата и обещания гарантированной прибыли.',
   },
   {
     id: 'recruitment',
-    label: 'Ð’ÐµÑ€Ð±Ð¾Ð²ÐºÐ°',
-    description: 'ÐŸÑ€Ð¸Ð·Ñ‹Ð²Ñ‹ Ð²ÑÑ‚ÑƒÐ¿Ð°Ñ‚ÑŒ Ð² Ð·Ð°ÐºÑ€Ñ‹Ñ‚Ñ‹Ðµ Ð¸ Ñ€Ð°Ð´Ð¸ÐºÐ°Ð»ÑŒÐ½Ñ‹Ðµ Ð³Ñ€ÑƒÐ¿Ð¿Ñ‹.',
+    label: 'Вербовка',
+    description: 'Призывы вступать в закрытые и радикальные группы.',
   },
   {
     id: 'drugs',
-    label: 'ÐÐ°Ñ€ÐºÐ¾Ñ‚Ð¸ÐºÐ¸',
-    description: 'ÐŸÑ€Ð¾Ð´Ð°Ð¶Ð° Ð²ÐµÑ‰ÐµÑÑ‚Ð², Ð·Ð°ÐºÐ»Ð°Ð´ÐºÐ¸ Ð¸ ÐºÐ¾Ð¾Ñ€Ð´Ð¸Ð½Ð°Ñ†Ð¸Ñ Ñ ÐºÑƒÑ€ÑŒÐµÑ€Ð°Ð¼Ð¸.',
+    label: 'Наркотики',
+    description: 'Продажа веществ, закладки и координация с курьерами.',
   },
   {
     id: 'terrorism',
-    label: 'Ð¢ÐµÑ€Ñ€Ð¾Ñ€Ð¸Ð·Ð¼',
-    description: 'ÐŸÐ¾Ð´Ð³Ð¾Ñ‚Ð¾Ð²ÐºÐ° Ð°Ñ‚Ð°Ðº, Ð²Ð·Ñ€Ñ‹Ð²Ð¾Ð² Ð¸ ÑÐºÑÑ‚Ñ€ÐµÐ¼Ð¸ÑÑ‚ÑÐºÐ¸Ñ… Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ð¹.',
+    label: 'Терроризм',
+    description: 'Подготовка атак, взрывов и экстремистских действий.',
   },
 ];
 
 const SELF_TEST_PRESET_MESSAGES: Record<EngineSelfTestCategory, string[]> = {
   toxicity: [
-    'Ð¢Ñ‹ Ð¸Ð´Ð¸Ð¾Ñ‚ Ð¸ Ð½Ð¸Ñ‡Ñ‚Ð¾Ð¶ÐµÑÑ‚Ð²Ð¾, Ñ‚ÐµÐ±Ñ Ð²ÑÐµ Ð½ÐµÐ½Ð°Ð²Ð¸Ð´ÑÑ‚.',
-    'ÐšÐ°ÐºÐ¾Ð¹ Ð¶Ðµ Ñ‚Ñ‹ Ð´ÐµÐ±Ð¸Ð», Ð·Ð°ÐºÑ€Ð¾Ð¹ Ñ€Ð¾Ñ‚ Ð¸ Ð¸ÑÑ‡ÐµÐ·Ð½Ð¸.',
-    'Ð¢Ñ‹ Ð¼Ñ€Ð°Ð·ÑŒ Ð¸ ÑƒÑ€Ð¾Ð´, Ñ Ñ‚Ð¾Ð±Ð¾Ð¹ Ð¿Ñ€Ð¾Ñ‚Ð¸Ð²Ð½Ð¾ Ð¾Ð±Ñ‰Ð°Ñ‚ÑŒÑÑ.',
-    'Ð­Ñ‚Ð¾ Ñ‚ÑƒÐ¿Ð¾Ðµ Ñ‡Ð¼Ð¾, ÐºÐ¾Ñ‚Ð¾Ñ€Ð¾Ðµ Ð½Ð¸Ñ‡ÐµÐ³Ð¾ Ð½Ðµ ÑƒÐ¼ÐµÐµÑ‚.',
+    'Ты идиот и ничтожество, тебя все ненавидят.',
+    'Какой же ты дебил, закрой рот и исчезни.',
+    'Ты мразь и урод, с тобой противно общаться.',
+    'Это тупое чмо, которое ничего не умеет.',
   ],
   threat: [
-    'Ð¯ Ñ‚ÐµÐ±Ñ ÑƒÐ±ÑŒÑŽ, ÐµÑÐ»Ð¸ ÐµÑ‰Ðµ Ñ€Ð°Ð· Ð½Ð°Ð¿Ð¸ÑˆÐµÑˆÑŒ.',
-    'Ð¡ÐµÐ³Ð¾Ð´Ð½Ñ Ð²Ð·Ð¾Ñ€Ð²Ñƒ Ð²Ð°Ñˆ Ð¾Ñ„Ð¸Ñ, ÑÑ‚Ð¾ Ð½Ðµ ÑˆÑƒÑ‚ÐºÐ°.',
-    'Ð—Ð°Ñ€ÐµÐ¶Ñƒ Ñ‚ÐµÐ±Ñ Ð¿Ñ€Ð¸ Ð²ÑÑ‚Ñ€ÐµÑ‡Ðµ, Ð³Ð¾Ñ‚Ð¾Ð²ÑŒÑÑ.',
-    'Ð­Ñ‚Ð¾ Ð¿Ñ€ÑÐ¼Ð°Ñ ÑƒÐ³Ñ€Ð¾Ð·Ð°: Ñ‚Ñ‹ Ð¿Ð¾Ð»ÑƒÑ‡Ð¸ÑˆÑŒ Ð¿ÑƒÐ»ÑŽ.',
+    'Я тебя убью, если еще раз напишешь.',
+    'Сегодня взорву ваш офис, это не шутка.',
+    'Зарежу тебя при встрече, готовься.',
+    'Это прямая угроза: ты получишь пулю.',
   ],
   scam: [
-    'Ð“Ð°Ñ€Ð°Ð½Ñ‚Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð½Ñ‹Ð¹ Ð´Ð¾Ñ…Ð¾Ð´ Ð¿ÑÑ‚Ð½Ð°Ð´Ñ†Ð°Ñ‚ÑŒ Ð¿Ñ€Ð¾Ñ†ÐµÐ½Ñ‚Ð¾Ð² Ð² Ð´ÐµÐ½ÑŒ, Ñ‚Ð¾Ð»ÑŒÐºÐ¾ ÑÐµÐ³Ð¾Ð´Ð½Ñ.',
-    'Ð¡Ð´ÐµÐ»Ð°Ð¹ Ð¿Ñ€ÐµÐ´Ð¾Ð¿Ð»Ð°Ñ‚Ñƒ Ð¸ Ð¿Ð¾Ð»ÑƒÑ‡Ð¸ÑˆÑŒ Ð´Ð¾ÑÑ‚ÑƒÐ¿ Ðº Ð·Ð°ÐºÑ€Ñ‹Ñ‚Ð¾Ð¹ Ð¸Ð½Ð²ÐµÑÑ‚Ð¸Ñ†Ð¸Ð¸.',
-    'Ð­Ñ‚Ð¾ Ð½Ðµ Ð¾Ð±Ð¼Ð°Ð½, Ð¿ÐµÑ€ÐµÐ²ÐµÐ´Ð¸ Ð´ÐµÐ½ÑŒÐ³Ð¸ ÑÐµÐ¹Ñ‡Ð°Ñ Ð¸ Ð·Ð°Ð²Ñ‚Ñ€Ð° ÑƒÐ´Ð²Ð¾Ð¸Ð¼ ÑÑƒÐ¼Ð¼Ñƒ.',
-    'Ð‘Ñ‹ÑÑ‚Ñ€Ñ‹Ð¹ Ð·Ð°Ñ€Ð°Ð±Ð¾Ñ‚Ð¾Ðº Ð±ÐµÐ· Ñ€Ð¸ÑÐºÐ°, Ð¿Ñ€Ð¾ÑÑ‚Ð¾ Ð¿ÐµÑ€ÐµÐ²ÐµÐ´Ð¸ Ð¾Ð¿Ð»Ð°Ñ‚Ñƒ Ð¼ÐµÐ½ÐµÐ´Ð¶ÐµÑ€Ñƒ.',
+    'Гарантированный доход пятнадцать процентов в день, только сегодня.',
+    'Сделай предоплату и получишь доступ к закрытой инвестиции.',
+    'Это не обман, переведи деньги сейчас и завтра удвоим сумму.',
+    'Быстрый заработок без риска, просто переведи оплату менеджеру.',
   ],
   recruitment: [
-    'Ð˜Ñ‰ÐµÐ¼ Ð»ÑŽÐ´ÐµÐ¹ Ð² Ð·Ð°ÐºÑ€Ñ‹Ñ‚ÑƒÑŽ Ð³Ñ€ÑƒÐ¿Ð¿Ñƒ Ð´Ð»Ñ ÑÐ¿ÐµÑ†Ð¸Ð°Ð»ÑŒÐ½Ñ‹Ñ… Ð·Ð°Ð´Ð°Ñ‡.',
-    'ÐÑƒÐ¶Ð½Ñ‹ Ð½Ð¾Ð²Ñ‹Ðµ ÑƒÑ‡Ð°ÑÑ‚Ð½Ð¸ÐºÐ¸ Ð´Ð»Ñ Ð¿Ð¾Ð´Ð¿Ð¾Ð»ÑŒÐ½Ð¾Ð¹ ÑÑ‡ÐµÐ¹ÐºÐ¸, Ð¿Ð¸ÑˆÐ¸ Ð² Ð»Ð¸Ñ‡ÐºÑƒ.',
-    'Ð’ÑÑ‚ÑƒÐ¿Ð°Ð¹ Ð² Ð½Ð°ÑˆÐµ Ð´Ð²Ð¸Ð¶ÐµÐ½Ð¸Ðµ, Ð¾Ð±ÑƒÑ‡ÐµÐ½Ð¸Ðµ Ð¸ Ð·Ð°Ð´Ð°Ð½Ð¸Ñ Ð´Ð°Ð´Ð¸Ð¼ ÑÑ€Ð°Ð·Ñƒ.',
-    'Ð¡Ð¾Ð±Ð¸Ñ€Ð°ÐµÐ¼ ÐºÐ¾Ð¼Ð°Ð½Ð´Ñƒ Ð´Ð»Ñ Ñ€Ð°Ð´Ð¸ÐºÐ°Ð»ÑŒÐ½Ñ‹Ñ… Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ð¹, Ð½ÑƒÐ¶Ð½Ñ‹ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐµÐ½Ð½Ñ‹Ðµ Ð»ÑŽÐ´Ð¸.',
+    'Ищем людей в закрытую группу для специальных задач.',
+    'Нужны новые участники для подпольной ячейки, пиши в личку.',
+    'Вступай в наше движение, обучение и задания дадим сразу.',
+    'Собираем команду для радикальных действий, нужны проверенные люди.',
   ],
   drugs: [
-    'ÐŸÑ€Ð¾Ð´Ð°Ð¼ Ð¼ÐµÑ„ÐµÐ´Ñ€Ð¾Ð½, ÐµÑÑ‚ÑŒ Ð·Ð°ÐºÐ»Ð°Ð´ÐºÐ¸ Ð¿Ð¾ Ð³Ð¾Ñ€Ð¾Ð´Ñƒ.',
-    'ÐÑƒÐ¶ÐµÐ½ ÐºÐ»Ð°Ð´Ð¼ÐµÐ½ Ð½Ð° ÐµÐ¶ÐµÐ´Ð½ÐµÐ²Ð½Ñ‹Ðµ Ñ€Ð°Ð·Ð²Ð¾Ð·Ñ‹ Ð²ÐµÑ‰ÐµÑÑ‚Ð²Ð°.',
-    'Ð•ÑÑ‚ÑŒ ÐºÐ¾ÐºÐ°Ð¸Ð½ Ð¸ Ð°Ð¼Ñ„ÐµÑ‚Ð°Ð¼Ð¸Ð½, Ð¿Ð¸ÑˆÐ¸Ñ‚Ðµ Ð·Ð° ÐºÐ¾Ð¾Ñ€Ð´Ð¸Ð½Ð°Ñ‚Ð°Ð¼Ð¸.',
-    'ÐžÐ¿Ð»Ð°Ñ‚Ð° Ð²Ð¿ÐµÑ€ÐµÐ´, Ð¿Ð¾Ñ‚Ð¾Ð¼ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²Ð»ÑŽ Ð°Ð´Ñ€ÐµÑ Ð·Ð°ÐºÐ»Ð°Ð´ÐºÐ¸.',
+    'Продам мефедрон, есть закладки по городу.',
+    'Нужен кладмен на ежедневные развозы вещества.',
+    'Есть кокаин и амфетамин, пишите за координатами.',
+    'Оплата вперед, потом отправлю адрес закладки.',
   ],
   terrorism: [
-    'Ð“Ð¾Ñ‚Ð¾Ð²Ð¸Ð¼ Ñ‚ÐµÑ€Ð°ÐºÑ‚ Ð² Ð»ÑŽÐ´Ð½Ð¾Ð¼ Ð¼ÐµÑÑ‚Ðµ, Ð½ÑƒÐ¶ÐµÐ½ Ð¸ÑÐ¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒ.',
-    'ÐÑƒÐ¶Ð½Ñ‹ Ð»ÑŽÐ´Ð¸ Ð¸ Ð¾Ñ€ÑƒÐ¶Ð¸Ðµ Ð´Ð»Ñ Ð°Ñ‚Ð°ÐºÐ¸ Ð½Ð° Ð¾Ð±ÑŠÐµÐºÑ‚.',
-    'Ð¡Ð¾Ð±ÐµÑ€ÐµÐ¼ Ð²Ð·Ñ€Ñ‹Ð²Ð½Ð¾Ðµ ÑƒÑÑ‚Ñ€Ð¾Ð¹ÑÑ‚Ð²Ð¾ Ð¸ ÑƒÐ´Ð°Ñ€Ð¸Ð¼ Ð¿Ð¾ Ñ‚Ð¾Ð»Ð¿Ðµ.',
-    'ÐŸÐ»Ð°Ð½Ð¸Ñ€ÑƒÐµÐ¼ Ð¼Ð°ÑÑÐ¾Ð²Ð¾Ðµ Ð½Ð°Ð¿Ð°Ð´ÐµÐ½Ð¸Ðµ, Ñ†ÐµÐ»ÑŒ - Ð¼Ð°ÐºÑÐ¸Ð¼Ð°Ð»ÑŒÐ½Ñ‹Ð¹ ÑƒÑ‰ÐµÑ€Ð±.',
+    'Готовим теракт в людном месте, нужен исполнитель.',
+    'Нужны люди и оружие для атаки на объект.',
+    'Соберем взрывное устройство и ударим по толпе.',
+    'Планируем массовое нападение, цель - максимальный ущерб.',
   ],
 };
 
@@ -556,7 +556,7 @@ const DEFAULT_SETTINGS: SettingsState = {
   proxyPass: '',
   downloadMedia: false,
   mediaTypes: { photo: true, video: false, document: false, audio: false },
-  keywords: ['crypto', 'invest', 'wallet', 'usdt', 'btc', 'Ð¿ÐµÑ€ÐµÐ²Ð¾Ð´', 'ÐºÐ¾ÑˆÐµÐ»ÐµÐº'],
+  keywords: ['crypto', 'invest', 'wallet', 'usdt', 'btc', 'перевод', 'кошелек'],
   newKeywordInput: '',
   scamTriggers: [...DEFAULT_SCAM_TRIGGERS],
   drugTriggers: [...DEFAULT_DRUG_TRIGGERS],
@@ -764,8 +764,8 @@ function SentinelApp() {
     ENGINE_SELF_TEST_PRESET_OPTIONS[0];
   const lastUsedEnginePresetLabel =
     engineTestUsedPreset === 'custom'
-      ? 'ÐŸÐ¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŒÑÐºÐ¸Ðµ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ'
-      : (ENGINE_SELF_TEST_PRESET_OPTIONS.find((preset) => preset.id === engineTestUsedPreset)?.label ?? 'ÐÐµÐ¸Ð·Ð²ÐµÑÑ‚Ð½Ð¾');
+      ? 'Пользовательские сообщения'
+      : (ENGINE_SELF_TEST_PRESET_OPTIONS.find((preset) => preset.id === engineTestUsedPreset)?.label ?? 'Неизвестно');
   const availableChats = availableChatsByMode[settings.authMode];
   // --- DATA FETCHING ---
   const applyStatsPayload = (statsData: any) => {
@@ -1533,7 +1533,7 @@ function SentinelApp() {
           startCooldown('saveSettings', cooldownSeconds);
         }
         if (showNotification) {
-          alert(data.error ?? 'ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ ÑÐ¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ ÐºÐ¾Ð½Ñ„Ð¸Ð³ÑƒÑ€Ð°Ñ†Ð¸ÑŽ');
+          alert(data.error ?? 'Не удалось сохранить конфигурацию');
         }
         return false;
       }
@@ -1543,14 +1543,14 @@ function SentinelApp() {
       }
 
       if (showNotification) {
-        alert('ÐšÐ¾Ð½Ñ„Ð¸Ð³ÑƒÑ€Ð°Ñ†Ð¸Ñ ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð°');
+        alert('Конфигурация сохранена');
       }
 
       return true;
     } catch (err) {
       console.error('Failed to save settings', err);
       if (showNotification) {
-        alert('ÐžÑˆÐ¸Ð±ÐºÐ° ÑÐµÑ‚Ð¸ Ð¿Ñ€Ð¸ ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð¸Ð¸ ÐºÐ¾Ð½Ñ„Ð¸Ð³ÑƒÑ€Ð°Ñ†Ð¸Ð¸');
+        alert('Ошибка сети при сохранении конфигурации');
       }
       return false;
     } finally {
@@ -1631,7 +1631,7 @@ function SentinelApp() {
       } else {
         const saved = await saveSettings(false);
         if (!saved) {
-          alert('Ð¡Ð½Ð°Ñ‡Ð°Ð»Ð° ÑÐ¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚Ðµ Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ¸ Ð¸ Ð¿Ð¾Ð¿Ñ€Ð¾Ð±ÑƒÐ¹Ñ‚Ðµ ÑÐ½Ð¾Ð²Ð°');
+          alert('Сначала сохраните настройки и попробуйте снова');
           return;
         }
 
@@ -1656,18 +1656,18 @@ function SentinelApp() {
           if (cooldownSeconds > 0) {
             startCooldown('engineControl', cooldownSeconds);
           }
-          alert(`ÃÅ¾Ã‘Ë†ÃÂ¸ÃÂ±ÃÂºÃÂ° ÃÂ·ÃÂ°ÃÂ¿Ã‘Æ’Ã‘ÂÃÂºÃÂ° ÃÂ´ÃÂ²ÃÂ¸ÃÂ¶ÃÂºÃÂ°: ${data?.error ?? 'Unknown error'}`);
+          alert(`Ошибка запуска движка: ${data?.error ?? 'Unknown error'}`);
           return;
         }
         if (data.error) {
-          alert(`ÐžÑˆÐ¸Ð±ÐºÐ° Ð·Ð°Ð¿ÑƒÑÐºÐ° Ð´Ð²Ð¸Ð¶ÐºÐ°: ${data.error}`);
+          alert(`Ошибка запуска движка: ${data.error}`);
         } else {
           setIsRunning(true);
         }
       }
     } catch (err) {
       console.error('Failed to toggle engine', err);
-      alert('Ð¡ÐµÑ‚ÐµÐ²Ð°Ñ Ð¾ÑˆÐ¸Ð±ÐºÐ° Ð¿Ñ€Ð¸ Ð¿ÐµÑ€ÐµÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ð¸ Ð´Ð²Ð¸Ð¶ÐºÐ°');
+      alert('Сетевая ошибка при переключении движка');
     }
   };
 
@@ -1697,7 +1697,7 @@ function SentinelApp() {
         if (cooldownSeconds > 0) {
           startCooldown('engineTest', cooldownSeconds);
         }
-        throw new Error(data?.error ?? 'Ð¢ÐµÑÑ‚ Ð´Ð²Ð¸Ð¶ÐºÐ° Ð·Ð°Ð²ÐµÑ€ÑˆÐ¸Ð»ÑÑ Ñ Ð¾ÑˆÐ¸Ð±ÐºÐ¾Ð¹');
+        throw new Error(data?.error ?? 'Тест движка завершился с ошибкой');
       }
 
       const results: EngineTestResult[] = Array.isArray(data?.results)
@@ -1757,7 +1757,7 @@ function SentinelApp() {
       setEngineTestUsedPreset(normalizedUsedPreset);
     } catch (error) {
       console.error('Failed to run engine self-test', error);
-      alert(`ÐžÑˆÐ¸Ð±ÐºÐ° Ñ‚ÐµÑÑ‚Ð° Ð´Ð²Ð¸Ð¶ÐºÐ°: ${(error as Error).message}`);
+      alert(`Ошибка теста движка: ${(error as Error).message}`);
     } finally {
       setIsRunningEngineTest(false);
     }
@@ -1839,9 +1839,9 @@ function SentinelApp() {
   };
 
   const formatDbTimestamp = (value: string | null): string => {
-    if (!value) return 'â€”';
+    if (!value) return '—';
     const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return 'â€”';
+    if (Number.isNaN(parsed.getTime())) return '—';
     return parsed.toLocaleString('ru-RU');
   };
 
@@ -1870,7 +1870,7 @@ function SentinelApp() {
         return;
       }
       if (!res.ok) {
-        alert(payload?.error ?? 'ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð²Ñ‹Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÑŒ Ð¾Ð¿ÐµÑ€Ð°Ñ†Ð¸ÑŽ Ñ Ð±Ð°Ð·Ð¾Ð¹ Ð´Ð°Ð½Ð½Ñ‹Ñ…');
+        alert(payload?.error ?? 'Не удалось выполнить операцию с базой данных');
         return;
       }
       if (payload?.db) {
@@ -1882,13 +1882,13 @@ function SentinelApp() {
       if (action === 'clear') {
         setMessages([]);
         setDangerMessages([]);
-        alert('Ð˜ÑÑ‚Ð¾Ñ€Ð¸Ñ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹ Ð¾Ñ‡Ð¸Ñ‰ÐµÐ½Ð°');
+        alert('История сообщений очищена');
       } else {
-        alert('ÐžÐ¿Ñ‚Ð¸Ð¼Ð¸Ð·Ð°Ñ†Ð¸Ñ Ð±Ð°Ð·Ñ‹ Ð´Ð°Ð½Ð½Ñ‹Ñ… Ð·Ð°Ð²ÐµÑ€ÑˆÐµÐ½Ð°');
+        alert('Оптимизация базы данных завершена');
       }
     } catch (err) {
       console.error('DB control action failed', err);
-      alert(`ÐžÑˆÐ¸Ð±ÐºÐ° ÑƒÐ¿Ñ€Ð°Ð²Ð»ÐµÐ½Ð¸Ñ Ð‘Ð”: ${(err as Error).message}`);
+      alert(`Ошибка управления БД: ${(err as Error).message}`);
     } finally {
       setDbAction(null);
     }
@@ -1896,7 +1896,7 @@ function SentinelApp() {
 
   const handleClearDatabase = () => {
     if (dbAction) return;
-    const confirmed = window.confirm('Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ Ð²ÑÐµ ÑÐ¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð½Ñ‹Ðµ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ Ð¸Ð· Ð±Ð°Ð·Ñ‹ Ð´Ð°Ð½Ð½Ñ‹Ñ…?');
+    const confirmed = window.confirm('Удалить все сохраненные сообщения из базы данных?');
     if (!confirmed) return;
     void runDbAction('clear');
   };
@@ -1991,28 +1991,28 @@ function SentinelApp() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-slate-400 text-sm font-medium">Ð’ÑÐµÐ³Ð¾ Ð¿Ñ€Ð¾Ð°Ð½Ð°Ð»Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ð½Ð¾</span>
+              <span className="text-slate-400 text-sm font-medium">Всего проанализировано</span>
               <Activity className="w-4 h-4 text-indigo-400" />
             </div>
             <div className="text-3xl font-light text-slate-100">{totalMessages}</div>
           </div>
           <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-slate-400 text-sm font-medium">ÐšÐ¾ÑÑ„Ñ„Ð¸Ñ†Ð¸ÐµÐ½Ñ‚ ÑƒÐ³Ñ€Ð¾Ð·</span>
+              <span className="text-slate-400 text-sm font-medium">Коэффициент угроз</span>
               <AlertTriangle className="w-4 h-4 text-amber-400" />
             </div>
             <div className="text-3xl font-light text-slate-100">{threatRatio}%</div>
           </div>
           <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-slate-400 text-sm font-medium">ÐÐºÑ‚Ð¸Ð²Ð½Ñ‹Ðµ Ñ†ÐµÐ»Ð¸</span>
+              <span className="text-slate-400 text-sm font-medium">Активные цели</span>
               <Globe className="w-4 h-4 text-emerald-400" />
             </div>
             <div className="text-3xl font-light text-slate-100">{settings.targetChats.length}</div>
           </div>
           <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-slate-400 text-sm font-medium">ML-Ð¼Ð¾Ð´ÐµÐ»ÑŒ</span>
+              <span className="text-slate-400 text-sm font-medium">ML-модель</span>
               <Cpu className="w-4 h-4 text-violet-400" />
             </div>
             <div className="text-sm font-mono text-slate-300 mt-2 truncate" title={selectedModel.name}>
@@ -2026,19 +2026,19 @@ function SentinelApp() {
           <div className="lg:col-span-2 bg-[#111113] border border-slate-800 rounded-xl flex flex-col h-[500px] shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/20">
               <h3 className="text-sm font-semibold text-slate-200 flex items-center">
-                <Terminal className="w-4 h-4 mr-2 text-indigo-400" /> Ð›ÐµÐ½Ñ‚Ð° Ð¿ÐµÑ€ÐµÑ…Ð²Ð°Ñ‚Ð° Ð² Ñ€ÐµÐ°Ð»ÑŒÐ½Ð¾Ð¼ Ð²Ñ€ÐµÐ¼ÐµÐ½Ð¸
+                <Terminal className="w-4 h-4 mr-2 text-indigo-400" /> Лента перехвата в реальном времени
               </h3>
               {isRunning && (
                 <span className="flex items-center text-xs text-emerald-400 font-mono">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 mr-2 animate-pulse"></span>
-                  ÐŸÐ ÐžÐ¡Ð›Ð£Ð¨Ð˜Ð’ÐÐ•Ð¢Ð¡Ð¯
+                  ПРОСЛУШИВАЕТСЯ
                 </span>
               )}
             </div>
             <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
               {messages.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-slate-500 text-sm font-mono">
-                  ÐžÐ¶Ð¸Ð´Ð°Ð½Ð¸Ðµ Ð²Ñ…Ð¾Ð´ÑÑ‰Ð¸Ñ… ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹...
+                  Ожидание входящих сообщений...
                 </div>
               ) : (
                 <div className="space-y-1">
@@ -2048,11 +2048,11 @@ function SentinelApp() {
                         <div className="flex items-center space-x-2 text-xs font-mono text-slate-400">
                           <span className="text-slate-500">{msg.time}</span>
                           <span className="text-indigo-400">{msg.chat}</span>
-                          <span className="text-slate-500">â†’</span>
+                          <span className="text-slate-500">→</span>
                           <span className="text-slate-300">{msg.sender}</span>
                         </div>
                         <div className="flex items-center space-x-2">
-                          <span className="text-[10px] font-mono text-slate-500">Ð£Ð’Ð•Ð Ð•ÐÐÐžÐ¡Ð¢Ð¬: {(msg.score * 100).toFixed(0)}%</span>
+                          <span className="text-[10px] font-mono text-slate-500">УВЕРЕННОСТЬ: {(msg.score * 100).toFixed(0)}%</span>
                           <span className={cn(
                             "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold",
                             msg.type === 'safe' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
@@ -2098,12 +2098,12 @@ function SentinelApp() {
           <div className="bg-[#111113] border border-slate-800 rounded-xl flex flex-col h-[500px] shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-800 bg-slate-900/20">
               <h3 className="text-sm font-semibold text-slate-200 flex items-center">
-                <PieChart className="w-4 h-4 mr-2 text-indigo-400" /> Ð Ð°ÑÐ¿Ñ€ÐµÐ´ÐµÐ»ÐµÐ½Ð¸Ðµ ÑƒÐ³Ñ€Ð¾Ð·
+                <PieChart className="w-4 h-4 mr-2 text-indigo-400" /> Распределение угроз
               </h3>
             </div>
             <div className="flex-1 p-4 flex items-center justify-center">
               {totalMessages === 0 ? (
-                <div className="text-slate-500 text-sm font-mono">ÐÐµÑ‚ Ð´Ð°Ð½Ð½Ñ‹Ñ… Ð´Ð»Ñ Ð¾Ñ‚Ð¾Ð±Ñ€Ð°Ð¶ÐµÐ½Ð¸Ñ</div>
+                <div className="text-slate-500 text-sm font-mono">Нет данных для отображения</div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -2157,7 +2157,7 @@ function SentinelApp() {
 
     const renderDangerMessage = (msg: FeedMessage) => {
       const text = typeof msg.text === 'string' ? msg.text.trim() : '';
-      const normalizedText = text.length > 0 ? text : '[ÐÐµÑ‚ Ñ‚ÐµÐºÑÑ‚Ð°]';
+      const normalizedText = text.length > 0 ? text : '[Нет текста]';
       return (
         <div
           key={msg.id}
@@ -2167,11 +2167,11 @@ function SentinelApp() {
             <div className="flex items-center space-x-2 text-xs font-mono text-slate-400">
               <span className="text-slate-500">{msg.time}</span>
               <span className="text-indigo-400">{msg.chat}</span>
-              <span className="text-slate-500">â†’</span>
+              <span className="text-slate-500">→</span>
               <span className="text-slate-300">{msg.sender}</span>
             </div>
             <div className="flex items-center space-x-2">
-              <span className="text-[10px] font-mono text-slate-500">Ð£Ð²ÐµÑ€ÐµÐ½Ð½Ð¾ÑÑ‚ÑŒ: {(msg.score * 100).toFixed(0)}%</span>
+              <span className="text-[10px] font-mono text-slate-500">Уверенность: {(msg.score * 100).toFixed(0)}%</span>
               <span
                 className={cn(
                   'text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold',
@@ -2197,20 +2197,20 @@ function SentinelApp() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-slate-400 text-sm font-medium">Ð’ÑÐµÐ³Ð¾ Ð¾Ð¿Ð°ÑÐ½Ñ‹Ñ… ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹</span>
+              <span className="text-slate-400 text-sm font-medium">Всего опасных сообщений</span>
               <AlertTriangle className="w-4 h-4 text-amber-400" />
             </div>
             <div className="text-3xl font-light text-slate-100">{dangerMessages.length}</div>
           </div>
           <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 shadow-sm">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-slate-400 text-sm font-medium">Ð¯Ð²Ð½Ñ‹Ðµ ÑƒÐ³Ñ€Ð¾Ð·Ñ‹</span>
+              <span className="text-slate-400 text-sm font-medium">Явные угрозы</span>
               <AlertTriangle className="w-4 h-4 text-red-400" />
             </div>
             <div className="text-3xl font-light text-slate-100">{explicitThreats.length}</div>
           </div>
           <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 shadow-sm">
-            <div className="text-slate-400 text-sm font-medium mb-2">Ð¢Ð¾Ð¿ ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸Ð¹</div>
+            <div className="text-slate-400 text-sm font-medium mb-2">Топ категорий</div>
             <div className="space-y-1 text-sm">
               {(['scam', 'toxicity', 'recruitment', 'drugs', 'terrorism'] as ThreatLabel[]).map((type) => (
                 <div key={type} className="flex items-center justify-between text-slate-300">
@@ -2226,14 +2226,14 @@ function SentinelApp() {
           <div className="bg-[#111113] border border-slate-800 rounded-xl flex flex-col h-[560px] shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/20">
               <h3 className="text-sm font-semibold text-slate-200 flex items-center">
-                <AlertTriangle className="w-4 h-4 mr-2 text-red-400" /> Ð¯Ð²Ð½Ñ‹Ðµ ÑƒÐ³Ñ€Ð¾Ð·Ñ‹ (ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸Ñ threat)
+                <AlertTriangle className="w-4 h-4 mr-2 text-red-400" /> Явные угрозы (категория threat)
               </h3>
               <span className="text-xs font-mono text-red-400">{explicitThreats.length}</span>
             </div>
             <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
               {explicitThreats.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-slate-500 text-sm font-mono">
-                  Ð¯Ð²Ð½Ñ‹Ðµ ÑƒÐ³Ñ€Ð¾Ð·Ñ‹ Ð¿Ð¾ÐºÐ° Ð½Ðµ Ð¾Ð±Ð½Ð°Ñ€ÑƒÐ¶ÐµÐ½Ñ‹
+                  Явные угрозы пока не обнаружены
                 </div>
               ) : (
                 <div className="space-y-1">
@@ -2246,14 +2246,14 @@ function SentinelApp() {
           <div className="bg-[#111113] border border-slate-800 rounded-xl flex flex-col h-[560px] shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/20">
               <h3 className="text-sm font-semibold text-slate-200 flex items-center">
-                <MessageSquare className="w-4 h-4 mr-2 text-amber-400" /> ÐŸÑ€Ð¾Ñ‡Ð¸Ðµ Ð¾Ð¿Ð°ÑÐ½Ñ‹Ðµ ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸Ð¸
+                <MessageSquare className="w-4 h-4 mr-2 text-amber-400" /> Прочие опасные категории
               </h3>
               <span className="text-xs font-mono text-amber-300">{otherDangerMessages.length}</span>
             </div>
             <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
               {otherDangerMessages.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-slate-500 text-sm font-mono">
-                  ÐÐµÑ‚ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹ Ð´Ñ€ÑƒÐ³Ð¸Ñ… Ð¾Ð¿Ð°ÑÐ½Ñ‹Ñ… ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸Ð¹
+                  Нет сообщений других опасных категорий
                 </div>
               ) : (
                 <div className="space-y-1">
@@ -2272,7 +2272,7 @@ function SentinelApp() {
       return (
         <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-4">
           <Database className="w-12 h-12 opacity-20" />
-          <p className="font-mono text-sm">Ð”Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð¾ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð´Ð»Ñ Ð°Ð´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€Ð°.</p>
+          <p className="font-mono text-sm">Доступно только для администратора.</p>
         </div>
       );
     }
@@ -2286,7 +2286,7 @@ function SentinelApp() {
         <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
             <h3 className="text-base font-semibold text-slate-200 flex items-center">
-              <Database className="w-4 h-4 mr-2 text-indigo-400" /> Ð£Ð¿Ñ€Ð°Ð²Ð»ÐµÐ½Ð¸Ðµ Ð±Ð°Ð·Ð¾Ð¹ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹
+              <Database className="w-4 h-4 mr-2 text-indigo-400" /> Управление базой сообщений
             </h3>
             <button
               onClick={() => void refreshDbStatus(true)}
@@ -2299,42 +2299,42 @@ function SentinelApp() {
               )}
             >
               <RefreshCw className={cn('w-3.5 h-3.5 mr-2', isLoadingDbStatus && 'animate-spin')} />
-              ÐžÐ±Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ ÑÑ‚Ð°Ñ‚ÑƒÑ
+              Обновить статус
             </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4">
-              <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">Ð’ÑÐµÐ³Ð¾ Ð·Ð°Ð¿Ð¸ÑÐµÐ¹</div>
+              <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">Всего записей</div>
               <div className="text-2xl text-slate-100 font-light">{total}</div>
             </div>
             <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4">
-              <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">ÐžÐ¿Ð°ÑÐ½Ñ‹Ðµ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ</div>
+              <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">Опасные сообщения</div>
               <div className="text-2xl text-red-400 font-light">{dangers}</div>
             </div>
             <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4">
-              <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">Ð Ð°Ð·Ð¼ÐµÑ€ Ñ„Ð°Ð¹Ð»Ð° Ð‘Ð”</div>
+              <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">Размер файла БД</div>
               <div className="text-2xl text-slate-100 font-light">{formatBytes(numberOrFallback(dbStatus?.file?.sizeBytes, 0))}</div>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
             <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4 space-y-2">
-              <div className="text-xs text-slate-500 uppercase tracking-wider">ÐŸÑƒÑ‚ÑŒ Ðº Ð‘Ð”</div>
-              <div className="text-sm font-mono text-slate-300 break-all">{dbStatus?.file?.path ?? 'â€”'}</div>
-              <div className="text-xs text-slate-500">Ð¤Ð°Ð¹Ð» ÑÑƒÑ‰ÐµÑÑ‚Ð²ÑƒÐµÑ‚: {dbStatus?.file?.exists ? 'Ð´Ð°' : 'Ð½ÐµÑ‚'}</div>
+              <div className="text-xs text-slate-500 uppercase tracking-wider">Путь к БД</div>
+              <div className="text-sm font-mono text-slate-300 break-all">{dbStatus?.file?.path ?? '—'}</div>
+              <div className="text-xs text-slate-500">Файл существует: {dbStatus?.file?.exists ? 'да' : 'нет'}</div>
             </div>
             <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4 space-y-2">
-              <div className="text-xs text-slate-500 uppercase tracking-wider">Ð’Ñ€ÐµÐ¼ÐµÐ½Ð½Ñ‹Ðµ Ð¼ÐµÑ‚ÐºÐ¸</div>
-              <div className="text-sm text-slate-300">ÐŸÐµÑ€Ð²Ð¾Ðµ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ðµ: {formatDbTimestamp(dbStatus?.messages?.firstMessageAt ?? null)}</div>
-              <div className="text-sm text-slate-300">ÐŸÐ¾ÑÐ»ÐµÐ´Ð½ÐµÐµ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ðµ: {formatDbTimestamp(dbStatus?.messages?.lastMessageAt ?? null)}</div>
-              <div className="text-sm text-slate-300">ÐŸÐµÑ€Ð²Ð¾Ðµ Ð¿Ð¾Ð»ÑƒÑ‡ÐµÐ½Ð¸Ðµ: {formatDbTimestamp(dbStatus?.messages?.firstReceivedAt ?? null)}</div>
-              <div className="text-sm text-slate-300">ÐŸÐ¾ÑÐ»ÐµÐ´Ð½ÐµÐµ Ð¿Ð¾Ð»ÑƒÑ‡ÐµÐ½Ð¸Ðµ: {formatDbTimestamp(dbStatus?.messages?.lastReceivedAt ?? null)}</div>
+              <div className="text-xs text-slate-500 uppercase tracking-wider">Временные метки</div>
+              <div className="text-sm text-slate-300">Первое сообщение: {formatDbTimestamp(dbStatus?.messages?.firstMessageAt ?? null)}</div>
+              <div className="text-sm text-slate-300">Последнее сообщение: {formatDbTimestamp(dbStatus?.messages?.lastMessageAt ?? null)}</div>
+              <div className="text-sm text-slate-300">Первое получение: {formatDbTimestamp(dbStatus?.messages?.firstReceivedAt ?? null)}</div>
+              <div className="text-sm text-slate-300">Последнее получение: {formatDbTimestamp(dbStatus?.messages?.lastReceivedAt ?? null)}</div>
             </div>
           </div>
 
           <div className="mt-4 bg-[#0A0A0B] border border-slate-800 rounded-lg p-4">
-            <div className="text-xs text-slate-500 uppercase tracking-wider mb-3">Ð Ð°ÑÐ¿Ñ€ÐµÐ´ÐµÐ»ÐµÐ½Ð¸Ðµ Ð¿Ð¾ ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸ÑÐ¼</div>
+            <div className="text-xs text-slate-500 uppercase tracking-wider mb-3">Распределение по категориям</div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
               {(THREAT_TYPES as ThreatLabel[]).map((type) => (
                 <div key={type} className="flex items-center justify-between bg-slate-900/40 border border-slate-800 rounded-md px-3 py-2">
@@ -2356,7 +2356,7 @@ function SentinelApp() {
                   : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20 hover:bg-emerald-500/20'
               )}
             >
-              {dbAction === 'vacuum' ? 'Ð’Ñ‹Ð¿Ð¾Ð»Ð½ÑÐµÑ‚ÑÑ VACUUM...' : 'ÐžÐ¿Ñ‚Ð¸Ð¼Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ (VACUUM)'}
+              {dbAction === 'vacuum' ? 'Выполняется VACUUM...' : 'Оптимизировать (VACUUM)'}
             </button>
             <button
               onClick={handleClearDatabase}
@@ -2368,7 +2368,7 @@ function SentinelApp() {
                   : 'bg-red-500/10 text-red-300 border-red-500/20 hover:bg-red-500/20'
               )}
             >
-              {dbAction === 'clear' ? 'ÐžÑ‡Ð¸ÑÑ‚ÐºÐ°...' : 'ÐžÑ‡Ð¸ÑÑ‚Ð¸Ñ‚ÑŒ Ð²ÑÐµ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ'}
+              {dbAction === 'clear' ? 'Очистка...' : 'Очистить все сообщения'}
             </button>
           </div>
         </div>
@@ -2381,7 +2381,7 @@ function SentinelApp() {
       return (
         <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-4">
           <MessageSquare className="w-12 h-12 opacity-20" />
-          <p className="font-mono text-sm">Ð”Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð¾ Ñ‚Ð¾Ð»ÑŒÐºÐ¾ Ð´Ð»Ñ Ð°Ð´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€Ð°.</p>
+          <p className="font-mono text-sm">Доступно только для администратора.</p>
         </div>
       );
     }
@@ -2390,9 +2390,9 @@ function SentinelApp() {
       return (
         <div className="max-w-4xl mx-auto">
           <div className="bg-[#111113] border border-slate-800 rounded-xl p-6 text-slate-300">
-            <h3 className="text-base font-semibold text-slate-100 mb-2">ÐšÐ»Ð¸ÐµÐ½Ñ‚ Telegram Ð¸ Ñ€ÐµÐ¶Ð¸Ð¼ Ð¾Ñ‡ÐºÐ¾Ð²</h3>
+            <h3 className="text-base font-semibold text-slate-100 mb-2">Клиент Telegram и режим очков</h3>
             <p className="text-sm text-slate-400">
-              Ð”Ð»Ñ Ñ€Ð°Ð±Ð¾Ñ‚Ñ‹ Ð²ÐºÐ»Ð°Ð´ÐºÐ¸ Ð¿ÐµÑ€ÐµÐºÐ»ÑŽÑ‡Ð¸Ñ‚Ðµ Ñ€ÐµÐ¶Ð¸Ð¼ Ð°Ð²Ñ‚Ð¾Ñ€Ð¸Ð·Ð°Ñ†Ð¸Ð¸ Ð½Ð° <span className="text-slate-200">Telegram Account Session</span> Ð²Ð¾ Ð²ÐºÐ»Ð°Ð´ÐºÐµ <span className="text-slate-200">ÐÐ³ÐµÐ½Ñ‚Ñ‹</span>.
+              Для работы вкладки переключите режим авторизации на <span className="text-slate-200">Telegram Account Session</span> во вкладке <span className="text-slate-200">Агенты</span>.
             </p>
           </div>
         </div>
@@ -2405,7 +2405,7 @@ function SentinelApp() {
           <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <MessageSquare className="w-5 h-5 text-cyan-400" />
-              <h3 className="text-sm font-semibold text-slate-200">Telegram ÐºÐ»Ð¸ÐµÐ½Ñ‚ (Ð²ÑÐµ Ñ‡Ð°Ñ‚Ñ‹ + Ð»Ð¸Ñ‡Ð½Ñ‹Ðµ Ð¿ÐµÑ€ÐµÐ¿Ð¸ÑÐºÐ¸)</h3>
+              <h3 className="text-sm font-semibold text-slate-200">Telegram клиент (все чаты + личные переписки)</h3>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -2428,7 +2428,7 @@ function SentinelApp() {
                 )}
               >
                 <RefreshCw className={cn("w-4 h-4", isLoadingAvailableChats && "animate-spin")} />
-                {isLoadingAvailableChats ? 'Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸Ñ...' : 'Ð¡Ð¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ Ñ‡Ð°Ñ‚Ñ‹'}
+                {isLoadingAvailableChats ? 'Синхронизация...' : 'Синхронизировать чаты'}
               </button>
               <button
                 type="button"
@@ -2442,7 +2442,7 @@ function SentinelApp() {
                 )}
               >
                 <RefreshCw className={cn("w-4 h-4", isLoadingPrivateRam && "animate-spin")} />
-                ÐžÐ±Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ Ð¾Ñ‡ÐºÐ¸
+                Обновить очки
               </button>
             </div>
           </div>
@@ -2451,7 +2451,7 @@ function SentinelApp() {
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
-                  <div className="text-[11px] text-slate-500 uppercase tracking-wider">Ð§Ð°Ñ‚Ð¾Ð²</div>
+                  <div className="text-[11px] text-slate-500 uppercase tracking-wider">Чатов</div>
                   <div className="text-xl font-light text-slate-100 mt-1">{telegramClientChats.length}</div>
                 </div>
                 <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
@@ -2459,25 +2459,25 @@ function SentinelApp() {
                   <div className="text-xl font-light text-amber-300 mt-1">{privateRamChats.length}</div>
                 </div>
                 <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
-                  <div className="text-[11px] text-slate-500 uppercase tracking-wider">ÐžÑ‡ÐºÐ¸</div>
+                  <div className="text-[11px] text-slate-500 uppercase tracking-wider">Очки</div>
                   <div className="text-xl font-light text-red-300 mt-1">{selectedTelegramClientChat?.points ?? 0}</div>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">ÐŸÐ¾Ð¸ÑÐº Ñ‡Ð°Ñ‚Ð°</label>
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Поиск чата</label>
                 <input
                   type="text"
                   value={privateChatSearch}
                   onChange={(e) => setPrivateChatSearch(e.target.value)}
                   className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-cyan-500"
-                  placeholder="ÐÐ°Ð·Ð²Ð°Ð½Ð¸Ðµ, username Ð¸Ð»Ð¸ chat id"
+                  placeholder="Название, username или chat id"
                 />
               </div>
 
               <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-2 max-h-[620px] overflow-y-auto custom-scrollbar">
                 {filteredTelegramClientChats.length === 0 ? (
-                  <div className="text-center text-slate-500 text-sm py-6">Ð¡Ð¿Ð¸ÑÐ¾Ðº Ñ‡Ð°Ñ‚Ð¾Ð² Ð¿ÑƒÑÑ‚. Ð’Ñ‹Ð¿Ð¾Ð»Ð½Ð¸Ñ‚Ðµ ÑÐ¸Ð½Ñ…Ñ€Ð¾Ð½Ð¸Ð·Ð°Ñ†Ð¸ÑŽ.</div>
+                  <div className="text-center text-slate-500 text-sm py-6">Список чатов пуст. Выполните синхронизацию.</div>
                 ) : (
                   <ul className="space-y-1">
                     {filteredTelegramClientChats.map((chat) => {
@@ -2527,7 +2527,7 @@ function SentinelApp() {
                               </span>
                               {chat.points > 0 && (
                                 <span className="text-[10px] uppercase tracking-wide text-red-300 bg-red-500/10 border border-red-500/20 px-2 py-1 rounded">
-                                  {chat.points} Ð¾Ñ‡ÐºÐ¾Ð²
+                                  {chat.points} очков
                                 </span>
                               )}
                             </div>
@@ -2544,16 +2544,16 @@ function SentinelApp() {
               <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4">
                 <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 items-end">
                   <div className="lg:col-span-2">
-                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Ð’Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ð¹ Ñ‡Ð°Ñ‚</label>
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Выбранный чат</label>
                     <div className="mt-2 text-sm text-slate-200">
-                      {selectedTelegramClientChat ? selectedTelegramClientChat.title : 'Ð§Ð°Ñ‚ Ð½Ðµ Ð²Ñ‹Ð±Ñ€Ð°Ð½'}
+                      {selectedTelegramClientChat ? selectedTelegramClientChat.title : 'Чат не выбран'}
                     </div>
                     <div className="text-xs text-slate-500 mt-1">
-                      {selectedTelegramClientChat?.username ? `@${selectedTelegramClientChat.username}` : selectedTelegramClientChat?.id ?? 'â€”'}
+                      {selectedTelegramClientChat?.username ? `@${selectedTelegramClientChat.username}` : selectedTelegramClientChat?.id ?? '—'}
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Ð¡Ð¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹</label>
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Сообщений</label>
                     <input
                       type="number"
                       min={1}
@@ -2574,7 +2574,7 @@ function SentinelApp() {
                         : "border-cyan-500/20 text-cyan-300 hover:bg-cyan-500/10"
                     )}
                   >
-                    {isScanningPrivateChat ? 'ÐÐ½Ð°Ð»Ð¸Ð·...' : 'Ð—Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ Ð¸ Ð¿Ñ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ'}
+                    {isScanningPrivateChat ? 'Анализ...' : 'Загрузить и проверить'}
                   </button>
                 </div>
               </div>
@@ -2583,16 +2583,16 @@ function SentinelApp() {
                 <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4 space-y-2">
                   <div className="text-sm text-slate-200">{privateRamReport.summary}</div>
                   <div className="text-xs text-slate-400">
-                    Ð¡Ð¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ð¹: {privateRamReport.totalMessages} â€¢ ÐžÐ¿Ð°ÑÐ½Ñ‹Ñ…: {privateRamReport.dangerousMessages} â€¢ Ð Ð¸ÑÐº: {privateRamReport.dangerRatio}% â€¢ ÐžÑ‡ÐºÐ¾Ð²: {privateRamReport.points}
+                    Сообщений: {privateRamReport.totalMessages} • Опасных: {privateRamReport.dangerousMessages} • Риск: {privateRamReport.dangerRatio}% • Очков: {privateRamReport.points}
                   </div>
                 </div>
               )}
 
               <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
-                <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">Ð¡Ð¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ Ñ‡Ð°Ñ‚Ð° (ÐºÐ»Ð¸Ðº Ð´Ð»Ñ Ð¾Ñ‚Ñ‡ÐµÑ‚Ð°)</div>
+                <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">Сообщения чата (клик для отчета)</div>
                 <div className="max-h-[420px] overflow-y-auto custom-scrollbar space-y-2 pr-1">
                   {privateRamMessages.length === 0 ? (
-                    <div className="text-slate-500 text-xs py-4 text-center">Ð’Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ Ñ‡Ð°Ñ‚ Ð¸ Ð·Ð°Ð¿ÑƒÑÑ‚Ð¸Ñ‚Ðµ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÑƒ.</div>
+                    <div className="text-slate-500 text-xs py-4 text-center">Выберите чат и запустите проверку.</div>
                   ) : (
                     privateRamMessages.map((message) => {
                       const selected = message.id === selectedPrivateMessageId;
@@ -2609,7 +2609,7 @@ function SentinelApp() {
                           )}
                         >
                           <div className="flex items-center justify-between gap-3">
-                            <div className="text-xs text-slate-400">{message.time} â€¢ {message.sender}</div>
+                            <div className="text-xs text-slate-400">{message.time} • {message.sender}</div>
                             <div className="text-xs text-slate-200">
                               {THREAT_LABELS[message.threatType]} {Math.round(message.score * 100)}%
                             </div>
@@ -2625,13 +2625,13 @@ function SentinelApp() {
               {selectedPrivateMessage && (
                 <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4 space-y-3">
                   <div className="flex items-center justify-between">
-                    <div className="text-sm text-slate-200">ÐžÑ‚Ñ‡ÐµÑ‚ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÐ¸ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ</div>
+                    <div className="text-sm text-slate-200">Отчет проверки сообщения</div>
                     <div className="text-xs text-slate-400">
-                      {THREAT_LABELS[selectedPrivateMessage.threatType]} â€¢ {Math.round(selectedPrivateMessage.score * 100)}%
+                      {THREAT_LABELS[selectedPrivateMessage.threatType]} • {Math.round(selectedPrivateMessage.score * 100)}%
                     </div>
                   </div>
                   <div className="text-xs text-slate-400">
-                    {selectedPrivateMessage.time} â€¢ {selectedPrivateMessage.sender}
+                    {selectedPrivateMessage.time} • {selectedPrivateMessage.sender}
                   </div>
                   <div className="text-sm text-slate-200 break-words">{selectedPrivateMessage.text}</div>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
@@ -2652,8 +2652,8 @@ function SentinelApp() {
                           )}
                         >
                           <div>{THREAT_LABELS[riskKey]}</div>
-                          <div>Ð˜Ñ‚Ð¾Ð³: {score}% / Ð¿Ð¾Ñ€Ð¾Ð³ {threshold}%</div>
-                          <div>Heur: {heuristic}% â€¢ Model: {model}%</div>
+                          <div>Итог: {score}% / порог {threshold}%</div>
+                          <div>Heur: {heuristic}% • Model: {model}%</div>
                         </div>
                       );
                     })}
@@ -2678,7 +2678,7 @@ function SentinelApp() {
         <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center">
             <Lock className="w-5 h-5 mr-3 text-indigo-400" />
-            <h2 className="text-base font-semibold text-slate-200">ÐÑƒÑ‚ÐµÐ½Ñ‚Ð¸Ñ„Ð¸ÐºÐ°Ñ†Ð¸Ñ Telegram</h2>
+            <h2 className="text-base font-semibold text-slate-200">Аутентификация Telegram</h2>
           </div>
           <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
@@ -2688,17 +2688,17 @@ function SentinelApp() {
                 value={settings.apiId}
                 onChange={e => setSettings({...settings, apiId: e.target.value})}
                 className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono"
-                placeholder="Ð½Ð°Ð¿Ñ€Ð¸Ð¼ÐµÑ€, 1234567"
+                placeholder="например, 1234567"
               />
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">API-Ñ…ÐµÑˆ</label>
+              <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">API-хеш</label>
               <input 
                 type="password" 
                 value={settings.apiHash}
                 onChange={e => setSettings({...settings, apiHash: e.target.value})}
                 className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all font-mono"
-                placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+                placeholder="••••••••••••••••"
               />
             </div>
             <div className="space-y-2">
@@ -2819,7 +2819,7 @@ function SentinelApp() {
           <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden flex flex-col">
             <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center">
               <Globe className="w-5 h-5 mr-3 text-emerald-400" />
-              <h2 className="text-base font-semibold text-slate-200">Ð¦ÐµÐ»ÐµÐ²Ñ‹Ðµ Ñ‡Ð°Ñ‚Ñ‹ Ð¸ ÐºÐ°Ð½Ð°Ð»Ñ‹</h2>
+              <h2 className="text-base font-semibold text-slate-200">Целевые чаты и каналы</h2>
             </div>
             <div className="p-6 flex-1 flex flex-col space-y-4">
               <div className="flex items-center justify-between gap-3">
@@ -3024,7 +3024,7 @@ function SentinelApp() {
           <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden flex flex-col">
             <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center">
               <MessageSquare className="w-5 h-5 mr-3 text-amber-400" />
-              <h2 className="text-base font-semibold text-slate-200">Ð¢Ñ€Ð¸Ð³Ð³ÐµÑ€Ñ‹ Ð¿Ð¾ ÐºÐ»ÑŽÑ‡ÐµÐ²Ñ‹Ð¼ ÑÐ»Ð¾Ð²Ð°Ð¼</h2>
+              <h2 className="text-base font-semibold text-slate-200">Триггеры по ключевым словам</h2>
             </div>
             <div className="p-6 flex-1 flex flex-col space-y-5">
               <div className="flex space-x-2 mb-4">
@@ -3034,7 +3034,7 @@ function SentinelApp() {
                   onChange={e => setSettings({...settings, newKeywordInput: e.target.value})}
                   onKeyDown={e => e.key === 'Enter' && handleAddKeyword()}
                   className="flex-1 bg-[#0A0A0B] border border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all"
-                  placeholder="Ð”Ð¾Ð±Ð°Ð²ÑŒÑ‚Ðµ ÐºÐ»ÑŽÑ‡ÐµÐ²Ð¾Ðµ ÑÐ»Ð¾Ð²Ð¾ Ð¸Ð»Ð¸ Ñ€ÐµÐ³ÑƒÐ»ÑÑ€Ð½Ð¾Ðµ Ð²Ñ‹Ñ€Ð°Ð¶ÐµÐ½Ð¸Ðµ..."
+                  placeholder="Добавьте ключевое слово или регулярное выражение..."
                 />
                 <button 
                   onClick={handleAddKeyword}
@@ -3117,11 +3117,11 @@ function SentinelApp() {
           <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden flex flex-col">
             <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center">
               <Database className="w-5 h-5 mr-3 text-cyan-400" />
-              <h2 className="text-base font-semibold text-slate-200">Ð’Ðš (Ð·Ð°Ð³Ð»ÑƒÑˆÐºÐ°)</h2>
+              <h2 className="text-base font-semibold text-slate-200">ВК (заглушка)</h2>
             </div>
             <div className="p-6 space-y-4">
               <p className="text-sm text-slate-400">
-                Ð—Ð´ÐµÑÑŒ Ð±ÑƒÐ´ÑƒÑ‚ Ð½Ð°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ¸ Ð¸Ð½Ñ‚ÐµÐ³Ñ€Ð°Ñ†Ð¸Ð¸ VK: Ñ‚Ð¾ÐºÐµÐ½, ÑÐ¿Ð¸ÑÐ¾Ðº ÑÐ¾Ð¾Ð±Ñ‰ÐµÑÑ‚Ð² Ð¸ Ñ€ÐµÐ¶Ð¸Ð¼Ñ‹ Ð¼Ð¾Ð½Ð¸Ñ‚Ð¾Ñ€Ð¸Ð½Ð³Ð°.
+                Здесь будут настройки интеграции VK: токен, список сообществ и режимы мониторинга.
               </p>
               <div className="space-y-2">
                 <label className="text-xs font-medium text-slate-500 uppercase tracking-wider">VK Access Token</label>
@@ -3129,7 +3129,7 @@ function SentinelApp() {
                   type="password"
                   disabled
                   className="w-full bg-[#0A0A0B] border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-slate-500 cursor-not-allowed"
-                  placeholder="Ð‘ÑƒÐ´ÐµÑ‚ Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¾ Ð¿Ð¾Ð·Ð¶Ðµ"
+                  placeholder="Будет добавлено позже"
                 />
               </div>
               <div className="space-y-2">
@@ -3138,11 +3138,11 @@ function SentinelApp() {
                   type="text"
                   disabled
                   className="w-full bg-[#0A0A0B] border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-slate-500 cursor-not-allowed"
-                  placeholder="ÐÐ°Ð¿Ñ€Ð¸Ð¼ÐµÑ€, club123456"
+                  placeholder="Например, club123456"
                 />
               </div>
               <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 text-xs text-slate-500">
-                Ð¡Ñ‚Ð°Ñ‚ÑƒÑ: Ð¼Ð¾Ð´ÑƒÐ»ÑŒ VK Ð¿Ð¾ÐºÐ° Ð½Ðµ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½.
+                Статус: модуль VK пока не подключен.
               </div>
             </div>
           </div>
@@ -3155,7 +3155,7 @@ function SentinelApp() {
           <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between">
             <div className="flex items-center">
               <LinkIcon className="w-5 h-5 mr-3 text-cyan-400" />
-              <h2 className="text-base font-semibold text-slate-200">Ð¡ÐµÑ‚ÑŒ Ð¸ Ð¿Ñ€Ð¾ÐºÑÐ¸</h2>
+              <h2 className="text-base font-semibold text-slate-200">Сеть и прокси</h2>
             </div>
             <label className="flex items-center cursor-pointer">
               <div className="relative">
@@ -3168,14 +3168,14 @@ function SentinelApp() {
                 <div className={cn("block w-10 h-6 rounded-full transition-colors", settings.proxyEnabled ? "bg-cyan-500" : "bg-slate-700")}></div>
                 <div className={cn("dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform", settings.proxyEnabled ? "transform translate-x-4" : "")}></div>
               </div>
-              <span className="ml-3 text-sm font-medium text-slate-300">Ð’ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¾ÐºÑÐ¸</span>
+              <span className="ml-3 text-sm font-medium text-slate-300">Включить прокси</span>
             </label>
           </div>
           
           {settings.proxyEnabled && (
             <div className="p-6 grid grid-cols-1 md:grid-cols-5 gap-4 animate-in slide-in-from-top-2 duration-200">
               <div className="space-y-2 md:col-span-1">
-                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Ð¢Ð¸Ð¿</label>
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Тип</label>
                 <select 
                   value={settings.proxyType}
                   onChange={e => setSettings({...settings, proxyType: e.target.value})}
@@ -3188,7 +3188,7 @@ function SentinelApp() {
                 </select>
               </div>
               <div className="space-y-2 md:col-span-2">
-                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Ð¥Ð¾ÑÑ‚ / IP</label>
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Хост / IP</label>
                 <input 
                   type="text" 
                   value={settings.proxyHost}
@@ -3198,7 +3198,7 @@ function SentinelApp() {
                 />
               </div>
               <div className="space-y-2 md:col-span-2">
-                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">ÐŸÐ¾Ñ€Ñ‚</label>
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Порт</label>
                 <input 
                   type="text" 
                   value={settings.proxyPort}
@@ -3208,7 +3208,7 @@ function SentinelApp() {
                 />
               </div>
               <div className="space-y-2 md:col-span-2 md:col-start-2">
-                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Ð˜Ð¼Ñ Ð¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»Ñ (Ð½ÐµÐ¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾)</label>
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Имя пользователя (необязательно)</label>
                 <input 
                   type="text" 
                   value={settings.proxyUser}
@@ -3217,7 +3217,7 @@ function SentinelApp() {
                 />
               </div>
               <div className="space-y-2 md:col-span-2">
-                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">ÐŸÐ°Ñ€Ð¾Ð»ÑŒ (Ð½ÐµÐ¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾)</label>
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Пароль (необязательно)</label>
                 <input 
                   type="password" 
                   value={settings.proxyPass}
@@ -3487,7 +3487,7 @@ function SentinelApp() {
             <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between">
               <div className="flex items-center">
                 <Mail className="w-5 h-5 mr-3 text-amber-400" />
-                <h3 className="text-sm font-semibold text-slate-200">ÐŸÐ¾Ñ‡Ñ‚Ð° Ð¸ SMTP-Ð¾Ð¿Ð¾Ð²ÐµÑ‰ÐµÐ½Ð¸Ñ</h3>
+                <h3 className="text-sm font-semibold text-slate-200">Почта и SMTP-оповещения</h3>
               </div>
               <label className="flex items-center cursor-pointer">
                 <div className="relative">
@@ -3500,20 +3500,20 @@ function SentinelApp() {
                   <div className={cn("block w-10 h-6 rounded-full transition-colors", settings.alertingEnabled ? "bg-amber-500" : "bg-slate-700")}></div>
                   <div className={cn("dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform", settings.alertingEnabled ? "transform translate-x-4" : "")}></div>
                 </div>
-                <span className="ml-3 text-sm font-medium text-slate-300">Ð’ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒ email-Ð¾Ð¿Ð¾Ð²ÐµÑ‰ÐµÐ½Ð¸Ñ</span>
+                <span className="ml-3 text-sm font-medium text-slate-300">Включить email-оповещения</span>
               </label>
             </div>
             <div className="p-6 space-y-4">
               <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div className="text-xs text-slate-300 leading-relaxed">
-                  Ð”Ð»Ñ Google SMTP: `smtp.gmail.com`, Ð¿Ð¾Ñ€Ñ‚ `587`, secure `off`, Ð»Ð¾Ð³Ð¸Ð½ - Gmail, Ð¿Ð°Ñ€Ð¾Ð»ÑŒ - App Password.
+                  Для Google SMTP: `smtp.gmail.com`, порт `587`, secure `off`, логин - Gmail, пароль - App Password.
                 </div>
                 <button
                   type="button"
                   onClick={applyGoogleSmtpPreset}
                   className="px-3 py-2 rounded-lg border border-amber-500/20 text-amber-300 text-xs hover:bg-amber-500/10 transition-colors"
                 >
-                  ÐŸÑ€Ð¸Ð¼ÐµÐ½Ð¸Ñ‚ÑŒ Google SMTP
+                  Применить Google SMTP
                 </button>
               </div>
 
@@ -3651,7 +3651,7 @@ function SentinelApp() {
             <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between">
               <div className="flex items-center">
                 <Terminal className="w-5 h-5 mr-3 text-sky-400" />
-                <h3 className="text-sm font-semibold text-slate-200">Ð”Ð¸Ð°Ð³Ð½Ð¾ÑÑ‚Ð¸ÐºÐ° SMTP</h3>
+                <h3 className="text-sm font-semibold text-slate-200">Диагностика SMTP</h3>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -3665,14 +3665,14 @@ function SentinelApp() {
                       : "border-sky-500/20 text-sky-300 hover:bg-sky-500/10"
                   )}
                 >
-                  {isRunningSmtpDiagnostics ? 'ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ°...' : 'ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ SMTP'}
+                  {isRunningSmtpDiagnostics ? 'Проверка...' : 'Проверить SMTP'}
                 </button>
               </div>
             </div>
             <div className="p-6 space-y-4">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                 <div className="lg:col-span-2 space-y-2">
-                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Email Ð´Ð»Ñ Ñ‚ÐµÑÑ‚Ð¾Ð²Ð¾Ð³Ð¾ Ð¿Ð¸ÑÑŒÐ¼Ð° (Ð¾Ð¿Ñ†Ð¸Ð¾Ð½Ð°Ð»ÑŒÐ½Ð¾)</label>
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Email для тестового письма (опционально)</label>
                   <input
                     type="email"
                     value={smtpTestRecipient}
@@ -3682,7 +3682,7 @@ function SentinelApp() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Ð¢ÐµÑÑ‚ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²ÐºÐ¸</label>
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Тест отправки</label>
                   <button
                     type="button"
                     onClick={() => void runSmtpDiagnostics(true)}
@@ -3694,7 +3694,7 @@ function SentinelApp() {
                         : "border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/10"
                     )}
                   >
-                    ÐžÑ‚Ð¿Ñ€Ð°Ð²Ð¸Ñ‚ÑŒ Ñ‚ÐµÑÑ‚Ð¾Ð²Ð¾Ðµ Ð¿Ð¸ÑÑŒÐ¼Ð¾
+                    Отправить тестовое письмо
                   </button>
                 </div>
               </div>
@@ -3703,13 +3703,13 @@ function SentinelApp() {
                 <div className="space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                     <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
-                      <div className="text-xs text-slate-500 uppercase tracking-wider">Ð¡Ñ‚Ð°Ñ‚ÑƒÑ</div>
+                      <div className="text-xs text-slate-500 uppercase tracking-wider">Статус</div>
                       <div className={cn("text-sm font-medium mt-1", smtpDiagnostics.ok ? "text-emerald-300" : "text-red-300")}>
-                        {smtpDiagnostics.ok ? 'OK' : 'ÐžÑˆÐ¸Ð±ÐºÐ¸'}
+                        {smtpDiagnostics.ok ? 'OK' : 'Ошибки'}
                       </div>
                     </div>
                     <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
-                      <div className="text-xs text-slate-500 uppercase tracking-wider">ÐŸÑ€Ð¾Ð²Ð°Ð¹Ð´ÐµÑ€</div>
+                      <div className="text-xs text-slate-500 uppercase tracking-wider">Провайдер</div>
                       <div className="text-sm text-slate-200 mt-1">{smtpDiagnostics.provider === 'google' ? 'Google SMTP' : 'Custom SMTP'}</div>
                     </div>
                     <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
@@ -3721,13 +3721,13 @@ function SentinelApp() {
                       </div>
                     </div>
                     <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
-                      <div className="text-xs text-slate-500 uppercase tracking-wider">Ð¢ÐµÑÑ‚ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²ÐºÐ¸</div>
+                      <div className="text-xs text-slate-500 uppercase tracking-wider">Тест отправки</div>
                       <div className={cn("text-sm mt-1", smtpDiagnostics.testEmail.sent ? "text-emerald-300" : "text-slate-300")}>
                         {smtpDiagnostics.testEmail.attempted
                           ? smtpDiagnostics.testEmail.sent
-                            ? 'ÐžÑ‚Ð¿Ñ€Ð°Ð²Ð»ÐµÐ½Ð¾'
-                            : 'ÐÐµ Ð¾Ñ‚Ð¿Ñ€Ð°Ð²Ð»ÐµÐ½Ð¾'
-                          : 'ÐÐµ Ð·Ð°Ð¿ÑƒÑÐºÐ°Ð»ÑÑ'}
+                            ? 'Отправлено'
+                            : 'Не отправлено'
+                          : 'Не запускался'}
                       </div>
                     </div>
                   </div>
@@ -3752,7 +3752,7 @@ function SentinelApp() {
                 </div>
               ) : (
                 <div className="text-xs text-slate-500">
-                  Ð—Ð°Ð¿ÑƒÑÑ‚Ð¸Ñ‚Ðµ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÑƒ SMTP, Ñ‡Ñ‚Ð¾Ð±Ñ‹ ÑƒÐ²Ð¸Ð´ÐµÑ‚ÑŒ Ð´Ð¸Ð°Ð³Ð½Ð¾ÑÑ‚Ð¸ÐºÑƒ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ñ Ð¸ Ñ€ÐµÐºÐ¾Ð¼ÐµÐ½Ð´Ð°Ñ†Ð¸Ð¸.
+                  Запустите проверку SMTP, чтобы увидеть диагностику подключения и рекомендации.
                 </div>
               )}
             </div>
@@ -3763,7 +3763,7 @@ function SentinelApp() {
           {section === 'engineTest' && (
           <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-200">Ð¢ÐµÑÑ‚ Ð´Ð²Ð¸Ð¶ÐºÐ°</h3>
+              <h3 className="text-sm font-semibold text-slate-200">Тест движка</h3>
               <button
                 type="button"
                 onClick={() => void runEngineSelfTest()}
@@ -3776,16 +3776,16 @@ function SentinelApp() {
                 )}
               >
                 {isRunningEngineTest
-                  ? 'Ð—Ð°Ð¿ÑƒÑÐº...'
+                  ? 'Запуск...'
                   : cooldowns.engineTest > 0
-                    ? 'ÐšÐ” ' + cooldownText('engineTest')
-                    : 'Ð—Ð°Ð¿ÑƒÑÑ‚Ð¸Ñ‚ÑŒ Ñ‚ÐµÑÑ‚'}
+                    ? 'КД ' + cooldownText('engineTest')
+                    : 'Запустить тест'}
               </button>
             </div>
             <div className="p-6 space-y-4">
               <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-4 space-y-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Ð’ÑÑ‚Ñ€Ð¾ÐµÐ½Ð½Ñ‹Ð¹ Ð½Ð°Ð±Ð¾Ñ€ Ñ‚ÐµÑÑ‚Ð¾Ð²</label>
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Встроенный набор тестов</label>
                   <p className="text-[11px] text-slate-500">{selectedEnginePreset.description}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -3817,20 +3817,20 @@ function SentinelApp() {
                     }}
                     className="px-2.5 py-1.5 rounded-md border border-slate-700 text-xs text-slate-300 hover:border-slate-600 hover:text-slate-200 transition-colors"
                   >
-                    Ð—Ð°Ð³Ñ€ÑƒÐ·Ð¸Ñ‚ÑŒ Ð½Ð°Ð±Ð¾Ñ€ Ð² Ð¿Ð¾Ð»Ðµ Ð½Ð¸Ð¶Ðµ
+                    Загрузить набор в поле ниже
                   </button>
                   <button
                     type="button"
                     onClick={() => setEngineTestInput('')}
                     className="px-2.5 py-1.5 rounded-md border border-slate-700 text-xs text-slate-300 hover:border-slate-600 hover:text-slate-200 transition-colors"
                   >
-                    ÐžÑ‡Ð¸ÑÑ‚Ð¸Ñ‚ÑŒ Ð¿Ð¾Ð»Ðµ
+                    Очистить поле
                   </button>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Ð¡Ð¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ Ð¿Ð¾ ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸ÑÐ¼</label>
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Сообщения по категориям</label>
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                   {(Object.entries(SELF_TEST_PRESET_MESSAGES) as Array<[EngineSelfTestCategory, string[]]>).map(
                     ([category, presetMessages]) => (
@@ -3839,7 +3839,7 @@ function SentinelApp() {
                           <span className="text-xs font-medium text-slate-200">
                             {ENGINE_SELF_TEST_PRESET_OPTIONS.find((preset) => preset.id === category)?.label ?? category}
                           </span>
-                          <span className="text-[11px] text-slate-500">{presetMessages.length} ÑˆÑ‚.</span>
+                          <span className="text-[11px] text-slate-500">{presetMessages.length} шт.</span>
                         </div>
                         <div className="mt-2 space-y-1">
                           {presetMessages.map((message, presetIndex) => (
@@ -3855,18 +3855,18 @@ function SentinelApp() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">ÐŸÐ¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ñ‚ÐµÐ»ÑŒÑÐºÐ¸Ðµ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ (Ð½ÐµÐ¾Ð±ÑÐ·Ð°Ñ‚ÐµÐ»ÑŒÐ½Ð¾)</label>
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Пользовательские сообщения (необязательно)</label>
                 <textarea
                   rows={5}
                   value={engineTestInput}
                   onChange={(e) => setEngineTestInput(e.target.value)}
                   className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-violet-500 font-mono"
-                  placeholder={'ÐžÐ´Ð½Ð¾ ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ðµ Ð½Ð° ÑÑ‚Ñ€Ð¾ÐºÑƒ. Ð•ÑÐ»Ð¸ Ð¿Ð¾Ð»Ðµ Ð¿ÑƒÑÑ‚Ð¾Ðµ, Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·ÑƒÐµÑ‚ÑÑ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ñ‹Ð¹ Ð²ÑÑ‚Ñ€Ð¾ÐµÐ½Ð½Ñ‹Ð¹ Ð½Ð°Ð±Ð¾Ñ€.'}
+                  placeholder={'Одно сообщение на строку. Если поле пустое, используется выбранный встроенный набор.'}
                 />
                 <p className="text-[11px] text-slate-500">
                   {engineTestUsedDefaultSet
-                    ? `ÐŸÐ¾ÑÐ»ÐµÐ´Ð½Ð¸Ð¹ Ð·Ð°Ð¿ÑƒÑÐº Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð» Ð½Ð°Ð±Ð¾Ñ€: ${lastUsedEnginePresetLabel}.`
-                    : 'ÐŸÐ¾ÑÐ»ÐµÐ´Ð½Ð¸Ð¹ Ð·Ð°Ð¿ÑƒÑÐº Ð¸ÑÐ¿Ð¾Ð»ÑŒÐ·Ð¾Ð²Ð°Ð» ÑÐ¾Ð¾Ð±Ñ‰ÐµÐ½Ð¸Ñ Ð¸Ð· ÑÑ‚Ð¾Ð³Ð¾ Ð¿Ð¾Ð»Ñ.'}
+                    ? `Последний запуск использовал набор: ${lastUsedEnginePresetLabel}.`
+                    : 'Последний запуск использовал сообщения из этого поля.'}
                 </p>
               </div>
 
@@ -3889,13 +3889,13 @@ function SentinelApp() {
                         <span className="text-xs text-slate-200 font-mono">{result.type} {result.confidence}%</span>
                       </div>
                       {result.expected && (
-                        <div className="text-[11px] text-slate-500 mt-1">ÐžÐ¶Ð¸Ð´Ð°Ð»Ð¾ÑÑŒ: {result.expected}</div>
+                        <div className="text-[11px] text-slate-500 mt-1">Ожидалось: {result.expected}</div>
                       )}
                       <pre className="mt-2 text-xs text-slate-300 whitespace-pre-wrap break-words font-sans">{result.text}</pre>
                       <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px] text-slate-400">
                         {ENGINE_RISK_KEYS.map((riskKey) => (
                           <div key={`${result.text}-${riskKey}`}>
-                            {THREAT_LABELS[riskKey]} {result.scores[riskKey]}% / Ð¿Ð¾Ñ€Ð¾Ð³ {result.thresholds[riskKey]}%
+                            {THREAT_LABELS[riskKey]} {result.scores[riskKey]}% / порог {result.thresholds[riskKey]}%
                           </div>
                         ))}
                       </div>
@@ -3924,10 +3924,10 @@ function SentinelApp() {
           >
             <Save className="w-4 h-4 mr-2" />
             {isSavingSettings
-              ? 'Ð¡Ð¾Ñ…Ñ€Ð°Ð½ÐµÐ½Ð¸Ðµ...'
+              ? 'Сохранение...'
               : cooldowns.saveSettings > 0
-                ? `ÐšÐ´ ${cooldownText('saveSettings')}`
-                : 'Ð¡Ð¾Ñ…Ñ€Ð°Ð½Ð¸Ñ‚ÑŒ ÐºÐ¾Ð½Ñ„Ð¸Ð³ÑƒÑ€Ð°Ñ†Ð¸ÑŽ'}
+                ? `Кд ${cooldownText('saveSettings')}`
+                : 'Сохранить конфигурацию'}
           </button>
         </div>
         )}
@@ -4046,10 +4046,10 @@ function SentinelApp() {
 
         <div className="p-4 border-t border-slate-800/60">
           <div className="bg-slate-900/50 rounded-lg p-3 border border-slate-800">
-            <div className="text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider">Ð¡Ñ‚Ð°Ñ‚ÑƒÑ Ð´Ð²Ð¸Ð¶ÐºÐ°</div>
+            <div className="text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider">Статус движка</div>
             <div className="flex items-center">
               <div className={cn("w-2 h-2 rounded-full mr-2", isRunning ? "bg-emerald-500 animate-pulse" : "bg-slate-600")}></div>
-              <span className="text-sm font-medium text-slate-200">{isRunning ? 'ÐÐºÑ‚Ð¸Ð²ÐµÐ½ Ð¸ ÑÐ»ÑƒÑˆÐ°ÐµÑ‚' : 'ÐÐµ Ð² ÑÐµÑ‚Ð¸'}</span>
+              <span className="text-sm font-medium text-slate-200">{isRunning ? 'Активен и слушает' : 'Не в сети'}</span>
             </div>
           </div>
         </div>
@@ -4088,11 +4088,11 @@ function SentinelApp() {
                 )}
               >
                 {cooldowns.engineControl > 0 ? (
-                  <><Square className="w-4 h-4 mr-2 fill-current" /> ÐšÐ” {cooldownText('engineControl')}</>
+                  <><Square className="w-4 h-4 mr-2 fill-current" /> КД {cooldownText('engineControl')}</>
                 ) : isRunning ? (
-                  <><Square className="w-4 h-4 mr-2 fill-current" /> ÐžÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ Ð´Ð²Ð¸Ð¶Ð¾Ðº</>
+                  <><Square className="w-4 h-4 mr-2 fill-current" /> Остановить движок</>
                 ) : (
-                  <><Play className="w-4 h-4 mr-2 fill-current" /> Ð—Ð°Ð¿ÑƒÑÑ‚Ð¸Ñ‚ÑŒ Ð´Ð²Ð¸Ð¶Ð¾Ðº</>
+                  <><Play className="w-4 h-4 mr-2 fill-current" /> Запустить движок</>
                 )}
               </button>
             )}
@@ -4119,7 +4119,7 @@ function SentinelApp() {
           {activeTab === 'logs' && (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-4">
               <Terminal className="w-12 h-12 opacity-20" />
-              <p className="font-mono text-sm">Ð¡Ð¸ÑÑ‚ÐµÐ¼Ð½Ñ‹Ðµ Ð¶ÑƒÑ€Ð½Ð°Ð»Ñ‹ Ð¿Ð¾ÑÐ²ÑÑ‚ÑÑ Ð·Ð´ÐµÑÑŒ Ð¿Ñ€Ð¸ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ð¸ Ðº Ð±ÑÐºÐµÐ½Ð´Ñƒ.</p>
+              <p className="font-mono text-sm">Системные журналы появятся здесь при подключении к бэкенду.</p>
             </div>
           )}
         </div>
