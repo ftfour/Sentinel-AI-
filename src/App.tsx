@@ -497,6 +497,14 @@ type PrivateRamReport = {
   }>;
   summary: string;
 };
+type PrivateMessagesPaging = {
+  requestedLimit: number;
+  returned: number;
+  offsetId: number | null;
+  nextOffsetId: number | null;
+  hasMore: boolean;
+  totalInRam?: number;
+};
 type TelegramClientChatOption = {
   id: string;
   title: string;
@@ -708,6 +716,82 @@ function normalizeEngineScores(source: any): EngineRiskScores {
   };
 }
 
+function parsePrivateRamMessage(item: any, fallbackChatId: string): PrivateRamMessage {
+  return {
+    id: typeof item?.id === 'string' ? item.id : `${fallbackChatId}:${Math.random()}`,
+    telegramMessageId: typeof item?.telegramMessageId === 'number' ? item.telegramMessageId : null,
+    chatId: typeof item?.chatId === 'string' ? item.chatId : fallbackChatId,
+    chat: typeof item?.chat === 'string' ? item.chat : 'Unknown chat',
+    username: typeof item?.username === 'string' ? item.username : null,
+    type:
+      item?.type === 'group' || item?.type === 'supergroup' || item?.type === 'channel' || item?.type === 'private'
+        ? item.type
+        : 'group',
+    visibility: item?.visibility === 'open' ? 'open' : 'closed',
+    sender: typeof item?.sender === 'string' ? item.sender : 'Unknown',
+    text: typeof item?.text === 'string' ? item.text : '',
+    messageTs: numberOrFallback(item?.messageTs, 0),
+    time: typeof item?.time === 'string' ? item.time : '',
+    source: item?.source === 'scan' ? 'scan' : 'live',
+    threatType:
+      item?.threatType === 'safe' ||
+      item?.threatType === 'toxicity' ||
+      item?.threatType === 'threat' ||
+      item?.threatType === 'scam' ||
+      item?.threatType === 'recruitment' ||
+      item?.threatType === 'drugs' ||
+      item?.threatType === 'terrorism'
+        ? item.threatType
+        : 'safe',
+    score: Math.max(0, Math.min(1, numberOrFallback(item?.score, 0))),
+    scores: normalizeEngineScores(item?.scores),
+    thresholds: normalizeEngineScores(item?.thresholds),
+    heuristicScores: normalizeEngineScores(item?.heuristicScores ?? item?.scores),
+    modelScores: normalizeEngineScores(item?.modelScores ?? item?.scores),
+  };
+}
+
+function parsePrivateMessagesPaging(
+  value: any,
+  fallbackMessages: PrivateRamMessage[]
+): PrivateMessagesPaging {
+  const nextOffsetIdRaw = numberOrFallback(value?.nextOffsetId, 0);
+  const oldestMessage = fallbackMessages[fallbackMessages.length - 1] ?? null;
+  const fallbackOffsetId =
+    typeof oldestMessage?.telegramMessageId === 'number' && Number.isFinite(oldestMessage.telegramMessageId)
+      ? oldestMessage.telegramMessageId
+      : null;
+  return {
+    requestedLimit: Math.max(1, numberOrFallback(value?.requestedLimit, PRIVATE_MESSAGES_PAGE_SIZE)),
+    returned: Math.max(0, numberOrFallback(value?.returned, fallbackMessages.length)),
+    offsetId: Number.isFinite(numberOrFallback(value?.offsetId, NaN)) ? numberOrFallback(value?.offsetId, NaN) : null,
+    nextOffsetId: nextOffsetIdRaw > 0 ? Math.floor(nextOffsetIdRaw) : fallbackOffsetId,
+    hasMore: Boolean(value?.hasMore),
+    totalInRam: Number.isFinite(numberOrFallback(value?.totalInRam, NaN)) ? numberOrFallback(value?.totalInRam, NaN) : undefined,
+  };
+}
+
+function mergePrivateRamMessages(
+  current: PrivateRamMessage[],
+  incoming: PrivateRamMessage[]
+): PrivateRamMessage[] {
+  const byId = new Map<string, PrivateRamMessage>();
+  for (const message of current) {
+    byId.set(message.id, message);
+  }
+  for (const message of incoming) {
+    byId.set(message.id, message);
+  }
+  return Array.from(byId.values()).sort((left, right) => {
+    const leftId = left.telegramMessageId ?? 0;
+    const rightId = right.telegramMessageId ?? 0;
+    if (rightId !== leftId) {
+      return rightId - leftId;
+    }
+    return right.messageTs - left.messageTs;
+  });
+}
+
 // --- MAIN APP COMPONENT ---
 function SentinelApp() {
   const { user, logout } = useAuth();
@@ -736,13 +820,18 @@ function SentinelApp() {
   const [selectedPrivateMessageId, setSelectedPrivateMessageId] = useState('');
   const [isLoadingPrivateRam, setIsLoadingPrivateRam] = useState(false);
   const [isScanningPrivateChat, setIsScanningPrivateChat] = useState(false);
+  const [isLoadingMorePrivateMessages, setIsLoadingMorePrivateMessages] = useState(false);
   const [privateScanLimit, setPrivateScanLimit] = useState(80);
   const [privateChatSearch, setPrivateChatSearch] = useState('');
   const [privateMessagesPage, setPrivateMessagesPage] = useState(1);
+  const [privateMessagesHasMore, setPrivateMessagesHasMore] = useState(false);
+  const [privateMessagesNextOffsetId, setPrivateMessagesNextOffsetId] = useState<number | null>(null);
   const [selectedReportMessageId, setSelectedReportMessageId] = useState('');
   const [reportPriority, setReportPriority] = useState<ReportPriority>('high');
   const [reportAnalyst, setReportAnalyst] = useState('Дежурный аналитик');
   const [reportComment, setReportComment] = useState('');
+  const [reportEmailTo, setReportEmailTo] = useState('');
+  const [isSendingReportEmail, setIsSendingReportEmail] = useState(false);
   
   // Settings State
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
@@ -924,14 +1013,16 @@ function SentinelApp() {
       setPrivateRamReport(null);
       setSelectedPrivateMessageId('');
       setPrivateMessagesPage(1);
+      setPrivateMessagesHasMore(false);
+      setPrivateMessagesNextOffsetId(null);
       return;
     }
     const hasRamData = privateRamChats.some((chat) => chat.chatId === selectedPrivateChatId);
     if (!hasRamData) {
       return;
     }
-    void loadPrivateRamChatMessages(selectedPrivateChatId, 200);
-  }, [activeTab, user.role, settings.authMode, selectedPrivateChatId, privateRamChats]);
+    void loadPrivateRamChatMessages(selectedPrivateChatId, { limit: Math.max(privateScanLimit, 80) });
+  }, [activeTab, user.role, settings.authMode, selectedPrivateChatId, privateRamChats, privateScanLimit]);
 
   useEffect(() => {
     if (activeTab !== 'points' || user.role !== 'admin' || settings.authMode !== 'user') {
@@ -990,6 +1081,15 @@ function SentinelApp() {
       setSelectedReportMessageId(candidates[0].id);
     }
   }, [privateRamMessages, selectedReportMessageId]);
+
+  useEffect(() => {
+    if (reportEmailTo.trim().length > 0) {
+      return;
+    }
+    if (settings.alertEmailTo.trim().length > 0) {
+      setReportEmailTo(settings.alertEmailTo);
+    }
+  }, [settings.alertEmailTo, reportEmailTo]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1297,14 +1397,33 @@ function SentinelApp() {
     }
   };
 
-  const loadPrivateRamChatMessages = async (chatId: string, limit = 120): Promise<void> => {
+  const loadPrivateRamChatMessages = async (
+    chatId: string,
+    options?: {
+      append?: boolean;
+      limit?: number;
+    }
+  ): Promise<number> => {
     if (!chatId || !user || user.role !== 'admin' || settings.authMode !== 'user') {
-      return;
+      return 0;
+    }
+
+    const append = Boolean(options?.append);
+    const safeLimit = Math.max(10, Math.min(numberOrFallback(options?.limit, privateScanLimit), 120));
+    const offsetId = append ? privateMessagesNextOffsetId : null;
+    if (append) {
+      setIsLoadingMorePrivateMessages(true);
     }
 
     try {
       const encodedChatId = encodeURIComponent(chatId);
-      const res = await fetch(`/api/user/private-chats/${encodedChatId}/messages?limit=${Math.max(1, Math.min(limit, 300))}`);
+      const query = new URLSearchParams({
+        limit: String(safeLimit),
+      });
+      if (offsetId) {
+        query.set('offsetId', String(offsetId));
+      }
+      const res = await fetch(`/api/user/private-chats/${encodedChatId}/messages?${query.toString()}`);
       if (!res.ok) {
         if (res.status === 401) logout();
         const payload = await res.json().catch(() => ({}));
@@ -1312,114 +1431,107 @@ function SentinelApp() {
       }
       const payload = await res.json();
       const messages: PrivateRamMessage[] = Array.isArray(payload?.messages)
-        ? payload.messages.map((item: any) => ({
-            id: typeof item?.id === 'string' ? item.id : `${chatId}:${Math.random()}`,
-            telegramMessageId: typeof item?.telegramMessageId === 'number' ? item.telegramMessageId : null,
-            chatId: typeof item?.chatId === 'string' ? item.chatId : chatId,
-            chat: typeof item?.chat === 'string' ? item.chat : 'Unknown chat',
-            username: typeof item?.username === 'string' ? item.username : null,
-            type:
-              item?.type === 'group' || item?.type === 'supergroup' || item?.type === 'channel' || item?.type === 'private'
-                ? item.type
-                : 'group',
-            visibility: item?.visibility === 'open' ? 'open' : 'closed',
-            sender: typeof item?.sender === 'string' ? item.sender : 'Unknown',
-            text: typeof item?.text === 'string' ? item.text : '',
-            messageTs: numberOrFallback(item?.messageTs, 0),
-            time: typeof item?.time === 'string' ? item.time : '',
-            source: item?.source === 'scan' ? 'scan' : 'live',
-            threatType:
-              item?.threatType === 'safe' ||
-              item?.threatType === 'toxicity' ||
-              item?.threatType === 'threat' ||
-              item?.threatType === 'scam' ||
-              item?.threatType === 'recruitment' ||
-              item?.threatType === 'drugs' ||
-              item?.threatType === 'terrorism'
-                ? item.threatType
-                : 'safe',
-            score: Math.max(0, Math.min(1, numberOrFallback(item?.score, 0))),
-            scores: normalizeEngineScores(item?.scores),
-            thresholds: normalizeEngineScores(item?.thresholds),
-            heuristicScores: normalizeEngineScores(item?.heuristicScores ?? item?.scores),
-            modelScores: normalizeEngineScores(item?.modelScores ?? item?.scores),
-          }))
+        ? payload.messages.map((item: any) => parsePrivateRamMessage(item, chatId))
         : [];
-      setPrivateRamMessages(messages);
+      const paging = parsePrivateMessagesPaging(payload?.paging, messages);
+
+      if (append) {
+        setPrivateRamMessages((prev) => mergePrivateRamMessages(prev, messages));
+      } else {
+        setPrivateRamMessages(messages);
+        setSelectedPrivateMessageId(messages[0]?.id ?? '');
+        setPrivateMessagesPage(1);
+      }
       setPrivateRamReport(payload?.report ?? null);
-      setSelectedPrivateMessageId(messages[0]?.id ?? '');
-      setPrivateMessagesPage(1);
+      setPrivateMessagesNextOffsetId(paging.nextOffsetId);
+      setPrivateMessagesHasMore(Boolean(paging.nextOffsetId));
+      return messages.length;
     } catch (err) {
       console.error('Failed to load RAM chat messages', err);
+      return 0;
+    } finally {
+      if (append) {
+        setIsLoadingMorePrivateMessages(false);
+      }
     }
   };
 
-  const scanPrivateChat = async (): Promise<void> => {
+  const scanPrivateChat = async (options?: { append?: boolean }): Promise<number> => {
     if (!selectedPrivateChatId || !user || user.role !== 'admin' || settings.authMode !== 'user') {
-      return;
+      return 0;
     }
 
-    setIsScanningPrivateChat(true);
+    const append = Boolean(options?.append);
+    const offsetId = append ? privateMessagesNextOffsetId : null;
+    if (append) {
+      if (!offsetId || !privateMessagesHasMore) {
+        return 0;
+      }
+      setIsLoadingMorePrivateMessages(true);
+    } else {
+      setIsScanningPrivateChat(true);
+    }
+
     try {
       const encodedChatId = encodeURIComponent(selectedPrivateChatId);
       const res = await fetch(`/api/user/chats/${encodedChatId}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          limit: Math.max(1, Math.min(privateScanLimit, 250)),
+          limit: Math.max(10, Math.min(privateScanLimit, 120)),
+          offsetId,
         }),
       });
       const payload = await res.json();
       if (!res.ok) {
         if (res.status === 401) logout();
-        throw new Error(payload?.error ?? 'Failed to scan private chat');
+        const retryAfter =
+          Number.isFinite(numberOrFallback(payload?.retryAfterSec, NaN)) &&
+          numberOrFallback(payload?.retryAfterSec, NaN) > 0
+            ? ` Повторите через ${numberOrFallback(payload?.retryAfterSec, 1)} сек.`
+            : '';
+        throw new Error(`${payload?.error ?? 'Failed to scan private chat'}${retryAfter}`);
       }
 
       const messages: PrivateRamMessage[] = Array.isArray(payload?.messages)
-        ? payload.messages.map((item: any) => ({
-            id: typeof item?.id === 'string' ? item.id : `${selectedPrivateChatId}:${Math.random()}`,
-            telegramMessageId: typeof item?.telegramMessageId === 'number' ? item.telegramMessageId : null,
-            chatId: typeof item?.chatId === 'string' ? item.chatId : selectedPrivateChatId,
-            chat: typeof item?.chat === 'string' ? item.chat : 'Unknown chat',
-            username: typeof item?.username === 'string' ? item.username : null,
-            type:
-              item?.type === 'group' || item?.type === 'supergroup' || item?.type === 'channel' || item?.type === 'private'
-                ? item.type
-                : 'group',
-            visibility: item?.visibility === 'open' ? 'open' : 'closed',
-            sender: typeof item?.sender === 'string' ? item.sender : 'Unknown',
-            text: typeof item?.text === 'string' ? item.text : '',
-            messageTs: numberOrFallback(item?.messageTs, 0),
-            time: typeof item?.time === 'string' ? item.time : '',
-            source: item?.source === 'scan' ? 'scan' : 'live',
-            threatType:
-              item?.threatType === 'safe' ||
-              item?.threatType === 'toxicity' ||
-              item?.threatType === 'threat' ||
-              item?.threatType === 'scam' ||
-              item?.threatType === 'recruitment' ||
-              item?.threatType === 'drugs' ||
-              item?.threatType === 'terrorism'
-                ? item.threatType
-                : 'safe',
-            score: Math.max(0, Math.min(1, numberOrFallback(item?.score, 0))),
-            scores: normalizeEngineScores(item?.scores),
-            thresholds: normalizeEngineScores(item?.thresholds),
-            heuristicScores: normalizeEngineScores(item?.heuristicScores ?? item?.scores),
-            modelScores: normalizeEngineScores(item?.modelScores ?? item?.scores),
-          }))
+        ? payload.messages.map((item: any) => parsePrivateRamMessage(item, selectedPrivateChatId))
         : [];
+      const paging = parsePrivateMessagesPaging(payload?.paging, messages);
 
-      setPrivateRamMessages(messages);
-      setPrivateRamReport(payload?.report ?? null);
-      setSelectedPrivateMessageId(messages[0]?.id ?? '');
-      setPrivateMessagesPage(1);
+      if (append) {
+        setPrivateRamMessages((prev) => mergePrivateRamMessages(prev, messages));
+      } else {
+        setPrivateRamMessages(messages);
+        setSelectedPrivateMessageId(messages[0]?.id ?? '');
+        setPrivateMessagesPage(1);
+      }
+      if (payload?.report) {
+        setPrivateRamReport(payload.report);
+      }
+      setPrivateMessagesNextOffsetId(paging.nextOffsetId);
+      setPrivateMessagesHasMore(Boolean(paging.hasMore && paging.nextOffsetId));
       await refreshPrivateRamChats(false);
+      return messages.length;
     } catch (err) {
       console.error('Failed to scan private chat', err);
       alert(`Failed to analyze chat: ${(err as Error).message}`);
+      return 0;
     } finally {
-      setIsScanningPrivateChat(false);
+      if (append) {
+        setIsLoadingMorePrivateMessages(false);
+      } else {
+        setIsScanningPrivateChat(false);
+      }
+    }
+  };
+
+  const loadMorePrivateMessages = async (): Promise<void> => {
+    if (!privateMessagesHasMore || isScanningPrivateChat || isLoadingMorePrivateMessages) {
+      return;
+    }
+    const fetched = await scanPrivateChat({ append: true });
+    if (fetched > 0) {
+      setPrivateMessagesPage((prev) => prev + 1);
     }
   };
 
@@ -2102,6 +2214,47 @@ function SentinelApp() {
       alert('Не удалось скопировать черновик отчета');
     }
   };
+  const sendReportEmail = async (): Promise<void> => {
+    if (!selectedReportMessage || !reportDraftText) {
+      return;
+    }
+    setIsSendingReportEmail(true);
+    try {
+      const subject = `[Sentinel Report] ${THREAT_LABELS[selectedReportPrimaryRisk]} ${Math.round(selectedReportMessage.score * 100)}%`;
+      const res = await fetch('/api/reports/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject,
+          body: reportDraftText,
+          to: reportEmailTo.trim(),
+          settings: {
+            alertSmtpHost: settings.alertSmtpHost,
+            alertSmtpPort: settings.alertSmtpPort,
+            alertSmtpSecure: settings.alertSmtpSecure,
+            alertSmtpUser: settings.alertSmtpUser,
+            alertSmtpPass: settings.alertSmtpPass,
+            alertEmailFrom: settings.alertEmailFrom,
+            alertEmailTo: settings.alertEmailTo,
+          },
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        logout();
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(payload?.error ?? 'Не удалось отправить отчет');
+      }
+      alert(`Отчет отправлен на ${payload?.recipients ?? 1} адрес(ов).`);
+    } catch (err) {
+      console.error('Failed to send report email', err);
+      alert(`Ошибка отправки отчета: ${(err as Error).message}`);
+    } finally {
+      setIsSendingReportEmail(false);
+    }
+  };
 
   // --- RENDERERS ---
   const renderDashboard = () => {
@@ -2571,10 +2724,10 @@ function SentinelApp() {
               <button
                 type="button"
                 onClick={() => void refreshPrivateRamChats(true)}
-                disabled={isLoadingPrivateRam || isScanningPrivateChat}
+                disabled={isLoadingPrivateRam || isScanningPrivateChat || isLoadingMorePrivateMessages}
                 className={cn(
                   "inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs transition-colors",
-                  isLoadingPrivateRam || isScanningPrivateChat
+                  isLoadingPrivateRam || isScanningPrivateChat || isLoadingMorePrivateMessages
                     ? "border-slate-700 text-slate-500 cursor-not-allowed"
                     : "border-amber-500/20 text-amber-300 hover:bg-amber-500/10"
                 )}
@@ -2631,6 +2784,8 @@ function SentinelApp() {
                               setPrivateRamMessages([]);
                               setPrivateRamReport(null);
                               setPrivateMessagesPage(1);
+                              setPrivateMessagesHasMore(false);
+                              setPrivateMessagesNextOffsetId(null);
                             }}
                             className={cn(
                               "w-full text-left p-2 rounded-md border transition-colors",
@@ -2692,23 +2847,27 @@ function SentinelApp() {
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Сообщений</label>
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Размер батча</label>
                     <input
                       type="number"
-                      min={1}
-                      max={250}
+                      min={10}
+                      max={120}
                       value={privateScanLimit}
-                      onChange={(e) => setPrivateScanLimit(clampPercent(numberOrFallback(e.target.value, privateScanLimit), 1, 250))}
+                      onChange={(e) =>
+                        setPrivateScanLimit(
+                          clampPercent(numberOrFallback(e.target.value, privateScanLimit), 10, 120)
+                        )
+                      }
                       className="w-full mt-2 bg-[#070708] border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500"
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() => void scanPrivateChat()}
-                    disabled={!selectedPrivateChatId || isScanningPrivateChat}
+                    disabled={!selectedPrivateChatId || isScanningPrivateChat || isLoadingMorePrivateMessages}
                     className={cn(
                       "w-full px-3 py-2.5 rounded-lg border text-sm transition-colors",
-                      !selectedPrivateChatId || isScanningPrivateChat
+                      !selectedPrivateChatId || isScanningPrivateChat || isLoadingMorePrivateMessages
                         ? "border-slate-700 text-slate-500 cursor-not-allowed"
                         : "border-cyan-500/20 text-cyan-300 hover:bg-cyan-500/10"
                     )}
@@ -2733,15 +2892,15 @@ function SentinelApp() {
                   {privateRamMessages.length > 0 && (
                     <div className="flex items-center gap-2 text-[11px] text-slate-400">
                       <span>
-                        {privateMessagesRangeStart}-{privateMessagesRangeEnd} из {privateRamMessages.length}
+                        {privateMessagesRangeStart}-{privateMessagesRangeEnd} из {privateRamMessages.length}{privateMessagesHasMore ? '+' : ''}
                       </span>
                       <button
                         type="button"
                         onClick={() => setPrivateMessagesPage((prev) => Math.max(1, prev - 1))}
-                        disabled={privateMessagesPage <= 1}
+                        disabled={privateMessagesPage <= 1 || isLoadingMorePrivateMessages}
                         className={cn(
                           "px-2 py-1 rounded border transition-colors",
-                          privateMessagesPage <= 1
+                          privateMessagesPage <= 1 || isLoadingMorePrivateMessages
                             ? "border-slate-700 text-slate-600 cursor-not-allowed"
                             : "border-slate-600 text-slate-300 hover:bg-slate-800"
                         )}
@@ -2749,20 +2908,31 @@ function SentinelApp() {
                         Назад
                       </button>
                       <span className="min-w-[68px] text-center">
-                        {privateMessagesPage}/{privateMessagesTotalPages}
+                        {privateMessagesPage}/{privateMessagesTotalPages}{privateMessagesHasMore ? '+' : ''}
                       </span>
                       <button
                         type="button"
-                        onClick={() => setPrivateMessagesPage((prev) => Math.min(privateMessagesTotalPages, prev + 1))}
-                        disabled={privateMessagesPage >= privateMessagesTotalPages}
+                        onClick={() => {
+                          if (privateMessagesPage < privateMessagesTotalPages) {
+                            setPrivateMessagesPage((prev) => prev + 1);
+                            return;
+                          }
+                          if (privateMessagesHasMore) {
+                            void loadMorePrivateMessages();
+                          }
+                        }}
+                        disabled={
+                          isLoadingMorePrivateMessages ||
+                          (privateMessagesPage >= privateMessagesTotalPages && !privateMessagesHasMore)
+                        }
                         className={cn(
                           "px-2 py-1 rounded border transition-colors",
-                          privateMessagesPage >= privateMessagesTotalPages
+                          isLoadingMorePrivateMessages || (privateMessagesPage >= privateMessagesTotalPages && !privateMessagesHasMore)
                             ? "border-slate-700 text-slate-600 cursor-not-allowed"
                             : "border-slate-600 text-slate-300 hover:bg-slate-800"
                         )}
                       >
-                        Вперед
+                        {isLoadingMorePrivateMessages ? 'Подгрузка...' : 'Вперед'}
                       </button>
                     </div>
                   )}
@@ -3049,6 +3219,19 @@ function SentinelApp() {
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
+                        onClick={() => void sendReportEmail()}
+                        disabled={isSendingReportEmail || !reportDraftText}
+                        className={cn(
+                          "px-3 py-1.5 rounded border text-xs transition-colors",
+                          isSendingReportEmail || !reportDraftText
+                            ? "border-slate-700 text-slate-500 cursor-not-allowed"
+                            : "border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10"
+                        )}
+                      >
+                        {isSendingReportEmail ? 'Отправка...' : 'Отправить по SMTP'}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => void copyReportDraft()}
                         className="px-3 py-1.5 rounded border border-indigo-500/30 text-indigo-300 text-xs hover:bg-indigo-500/10 transition-colors"
                       >
@@ -3061,6 +3244,19 @@ function SentinelApp() {
                       >
                         Вернуться в режим очков
                       </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Кому отправить (email)</label>
+                    <input
+                      type="text"
+                      value={reportEmailTo}
+                      onChange={(e) => setReportEmailTo(e.target.value)}
+                      className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                      placeholder="email1@example.com, email2@example.com"
+                    />
+                    <div className="text-[11px] text-slate-500">
+                      Используется SMTP-конфигурация из вкладки «Почта / SMTP».
                     </div>
                   </div>
                   <textarea

@@ -191,8 +191,12 @@ const pendingSessionAuth = new Map<string, PendingSessionAuth>();
 const rateLimitStore = new Map<string, RateLimitEntry>();
 const alertCooldownStore = new Map<string, number>();
 const privateRamChatStore = new Map<string, PrivateRamChatState>();
+const userChatAnalyzeFloodStore = new Map<string, number>();
 const PRIVATE_RAM_CHAT_LIMIT = 300;
-const PRIVATE_RAM_MESSAGES_PER_CHAT_LIMIT = 400;
+const PRIVATE_RAM_MESSAGES_PER_CHAT_LIMIT = Number(
+  process.env.PRIVATE_RAM_MESSAGES_PER_CHAT_LIMIT ?? 0
+);
+const USER_CHAT_ANALYZE_MIN_INTERVAL_MS = 1200;
 let smtpTransportCache: { key: string; transporter: Transporter } | null = null;
 let lastAlertConfigWarningAt = 0;
 
@@ -823,7 +827,10 @@ function upsertPrivateRamMessage(entry: {
   }
   chatState.stats[message.threatType] += 1;
 
-  if (chatState.messages.length > PRIVATE_RAM_MESSAGES_PER_CHAT_LIMIT) {
+  if (
+    PRIVATE_RAM_MESSAGES_PER_CHAT_LIMIT > 0 &&
+    chatState.messages.length > PRIVATE_RAM_MESSAGES_PER_CHAT_LIMIT
+  ) {
     const overflow = chatState.messages.length - PRIVATE_RAM_MESSAGES_PER_CHAT_LIMIT;
     chatState.messages.splice(0, overflow);
   }
@@ -868,26 +875,83 @@ function readPrivateRamChats(limit = 100): Array<{
     });
 }
 
-function readPrivateRamMessages(chatId: string, limit = 120): {
+function readPrivateRamMessages(
+  chatId: string,
+  limitOrOptions:
+    | number
+    | {
+        limit?: number;
+        offsetId?: number | null;
+      } = 120
+): {
   chatId: string;
   chat: string;
   messages: PrivateRamMessage[];
   report: PrivateRamThreatReport;
+  paging: {
+    requestedLimit: number;
+    returned: number;
+    hasMore: boolean;
+    nextOffsetId: number | null;
+    offsetId: number | null;
+    totalInRam: number;
+  };
 } | null {
   const normalizedChatId = chatId.trim();
   const chatState = privateRamChatStore.get(normalizedChatId);
   if (!chatState) {
     return null;
   }
-  const safeLimit = Math.min(500, Math.max(1, Math.floor(limit)));
-  const ordered = [...chatState.messages]
-    .sort((left, right) => right.messageTs - left.messageTs)
-    .slice(0, safeLimit);
+
+  const requestedLimitRaw =
+    typeof limitOrOptions === 'number' ? limitOrOptions : limitOrOptions.limit ?? 120;
+  const safeLimit = Math.min(200, Math.max(1, Math.floor(requestedLimitRaw)));
+  const offsetIdRaw =
+    typeof limitOrOptions === 'number' ? null : limitOrOptions.offsetId ?? null;
+  const offsetId =
+    typeof offsetIdRaw === 'number' && Number.isFinite(offsetIdRaw) && offsetIdRaw > 0
+      ? Math.floor(offsetIdRaw)
+      : null;
+
+  const ordered = [...chatState.messages].sort((left, right) => {
+    const leftId = left.telegramMessageId ?? 0;
+    const rightId = right.telegramMessageId ?? 0;
+    if (rightId !== leftId) {
+      return rightId - leftId;
+    }
+    return right.messageTs - left.messageTs;
+  });
+  const filtered = offsetId
+    ? ordered.filter((message) => {
+        if (typeof message.telegramMessageId === 'number' && Number.isFinite(message.telegramMessageId)) {
+          return message.telegramMessageId < offsetId;
+        }
+        return message.messageTs * 1000 < offsetId;
+      })
+    : ordered;
+  const paged = filtered.slice(0, safeLimit);
+  const oldest = paged[paged.length - 1];
+  const nextOffsetId =
+    typeof oldest?.telegramMessageId === 'number' && Number.isFinite(oldest.telegramMessageId)
+      ? oldest.telegramMessageId
+      : oldest
+        ? Math.floor(oldest.messageTs * 1000)
+        : null;
+  const hasMore = filtered.length > paged.length;
+
   return {
     chatId: chatState.chatId,
     chat: chatState.chat,
-    messages: ordered,
+    messages: paged,
     report: buildPrivateRamThreatReport(chatState),
+    paging: {
+      requestedLimit: safeLimit,
+      returned: paged.length,
+      hasMore,
+      nextOffsetId,
+      offsetId,
+      totalInRam: ordered.length,
+    },
   };
 }
 
@@ -2535,6 +2599,23 @@ function consumeRateLimit(action: string, req: any, config: RateLimitConfig): { 
   return { allowed: true };
 }
 
+function consumeUserChatAnalyzeFloodControl(
+  req: any,
+  chatId: string
+): { allowed: true } | { allowed: false; retryAfterMs: number } {
+  const now = Date.now();
+  const normalizedChatId = chatId.trim();
+  const key = `${rateLimitActor(req)}|${normalizedChatId}`;
+  const nextAllowedAt = userChatAnalyzeFloodStore.get(key) ?? 0;
+
+  if (nextAllowedAt > now) {
+    return { allowed: false, retryAfterMs: nextAllowedAt - now };
+  }
+
+  userChatAnalyzeFloodStore.set(key, now + USER_CHAT_ANALYZE_MIN_INTERVAL_MS);
+  return { allowed: true };
+}
+
 function withRateLimit(action: string, config: RateLimitConfig) {
   return (req, res, next) => {
     const result = consumeRateLimit(action, req, config);
@@ -2578,6 +2659,12 @@ const RL_SMTP_DIAGNOSTICS = withRateLimit('smtp_diagnostics', {
   max: 12,
   cooldownMs: 15 * 1000,
   error: 'SMTP diagnostics cooldown is active.',
+});
+const RL_REPORT_EMAIL = withRateLimit('report_email', {
+  windowMs: 60 * 1000,
+  max: 8,
+  cooldownMs: 20 * 1000,
+  error: 'Report email cooldown is active.',
 });
 const RL_SESSION_REQUEST_CODE = withRateLimit('session_request_code', {
   windowMs: 10 * 60 * 1000,
@@ -2742,6 +2829,78 @@ app.post('/api/alerts/smtp/diagnostics', isAdmin, RL_SMTP_DIAGNOSTICS, async (re
       ok: false,
       error: `SMTP diagnostics failed: ${(error as Error).message}`,
     });
+  }
+});
+
+app.post('/api/reports/email', isAdmin, RL_REPORT_EMAIL, async (req, res) => {
+  const raw = typeof req.body === 'object' && req.body !== null ? (req.body as Record<string, unknown>) : {};
+  const settingsSource = raw.settings ?? persistedSettings;
+  const reportSettings = sanitizePersistedSettings(settingsSource, persistedSettings);
+  const smtpHost = reportSettings.alertSmtpHost.trim();
+  const smtpPort = reportSettings.alertSmtpPort;
+  const smtpSecure = reportSettings.alertSmtpSecure;
+  const smtpUser = reportSettings.alertSmtpUser.trim();
+  const smtpPass = reportSettings.alertSmtpPass;
+  const fallbackFrom =
+    reportSettings.alertEmailFrom.trim().length > 0
+      ? reportSettings.alertEmailFrom.trim()
+      : smtpUser.includes('@')
+        ? smtpUser
+        : '';
+  const toRaw = toStringValue(raw.to, reportSettings.alertEmailTo);
+  const recipients = normalizeEmailList(toRaw);
+  const subjectRaw = toStringValue(raw.subject, '').trim();
+  const bodyRaw = toStringValue(raw.body, '').trim();
+  const subject = subjectRaw.length > 0 ? subjectRaw.slice(0, 180) : '';
+  const body = bodyRaw.length > 0 ? bodyRaw.slice(0, 20000) : '';
+
+  if (!smtpHost) {
+    return res.status(400).json({ error: 'SMTP host is not configured.' });
+  }
+  if (smtpPort < 1 || smtpPort > 65535) {
+    return res.status(400).json({ error: 'SMTP port is invalid.' });
+  }
+  if (!fallbackFrom) {
+    return res.status(400).json({ error: 'From email is not configured in SMTP settings.' });
+  }
+  if (recipients.length === 0) {
+    return res.status(400).json({ error: 'Recipient list is empty.' });
+  }
+  if (!subject) {
+    return res.status(400).json({ error: 'Email subject is required.' });
+  }
+  if (!body) {
+    return res.status(400).json({ error: 'Email body is required.' });
+  }
+
+  try {
+    const transporter = getAlertTransporter({
+      smtpHost,
+      smtpPort,
+      smtpSecure,
+      smtpUser,
+      smtpPass,
+      emailFrom: fallbackFrom,
+      emailTo: recipients,
+      minScore: 0,
+      cooldownMs: 0,
+    });
+    const info = await transporter.sendMail({
+      from: fallbackFrom,
+      to: recipients.join(', '),
+      subject,
+      text: body,
+      html: `<pre>${escapeHtml(body)}</pre>`,
+    });
+
+    res.json({
+      ok: true,
+      messageId: typeof info?.messageId === 'string' ? info.messageId : null,
+      recipients: recipients.length,
+      from: fallbackFrom,
+    });
+  } catch (error) {
+    res.status(500).json({ error: `Failed to send report email: ${toSmtpDiagnosticErrorMessage(error)}` });
   }
 });
 
@@ -3890,7 +4049,10 @@ app.get('/api/user/private-chats/:chatId/messages', isAdmin, RL_PRIVATE_RAM_LIST
 
   const limitRaw = Number(req.query?.limit ?? 120);
   const limit = Number.isFinite(limitRaw) ? Math.floor(limitRaw) : 120;
-  const payload = readPrivateRamMessages(chatId, limit);
+  const offsetIdRaw = Number(req.query?.offsetId ?? 0);
+  const offsetId =
+    Number.isFinite(offsetIdRaw) && offsetIdRaw > 0 ? Math.floor(offsetIdRaw) : null;
+  const payload = readPrivateRamMessages(chatId, { limit, offsetId });
   if (!payload) {
     return res.status(404).json({ error: 'Chat is not present in RAM memory yet' });
   }
@@ -3901,6 +4063,18 @@ app.post('/api/user/chats/:chatId/analyze', isAdmin, RL_USER_CHAT_ANALYZE, async
   const requestedChatId = decodeURIComponent(toStringValue(req.params?.chatId, '')).trim();
   if (!requestedChatId) {
     return res.status(400).json({ error: 'chatId is required' });
+  }
+
+  const floodControl = consumeUserChatAnalyzeFloodControl(req, requestedChatId);
+  if (!floodControl.allowed) {
+    const retryAfterMs = 'retryAfterMs' in floodControl ? floodControl.retryAfterMs : USER_CHAT_ANALYZE_MIN_INTERVAL_MS;
+    const retryAfterSec = Math.max(1, Math.ceil(retryAfterMs / 1000));
+    res.setHeader('Retry-After', String(retryAfterSec));
+    return res.status(429).json({
+      error: 'Scan pagination is too fast. Please wait a moment before loading the next batch.',
+      retryAfterMs,
+      retryAfterSec,
+    });
   }
 
   if (persistedSettings.authMode !== 'user') {
@@ -3915,7 +4089,10 @@ app.post('/api/user/chats/:chatId/analyze', isAdmin, RL_USER_CHAT_ANALYZE, async
   }
 
   const limitRaw = Number(req.body?.limit ?? 80);
-  const limit = Number.isFinite(limitRaw) ? Math.min(250, Math.max(1, Math.floor(limitRaw))) : 80;
+  const limit = Number.isFinite(limitRaw) ? Math.min(120, Math.max(10, Math.floor(limitRaw))) : 80;
+  const offsetIdRaw = Number(req.body?.offsetId ?? 0);
+  const offsetId =
+    Number.isFinite(offsetIdRaw) && offsetIdRaw > 0 ? Math.floor(offsetIdRaw) : null;
 
   const reuseRunningClient =
     !!client &&
@@ -3942,8 +4119,23 @@ app.post('/api/user/chats/:chatId/analyze', isAdmin, RL_USER_CHAT_ANALYZE, async
         const visibility = resolveChatVisibility(chatType, chatUsername);
         const storageMode = resolveChatStorageMode('user', chatType, chatUsername);
 
-        const history = await clientRef.getMessages(entity as any, { limit });
-        const sourceMessages = Array.isArray(history) ? [...history].reverse() : [];
+        const history = await clientRef.getMessages(entity as any, {
+          limit: limit + 1,
+          ...(offsetId ? { offsetId } : {}),
+        });
+        const hasMore = Array.isArray(history) && history.length > limit;
+        const pagedHistory =
+          Array.isArray(history) && history.length > 0
+            ? hasMore
+              ? history.slice(0, limit)
+              : history
+            : [];
+        const oldestMessage = pagedHistory[pagedHistory.length - 1];
+        const nextOffsetId =
+          typeof oldestMessage?.id === 'number' && Number.isFinite(oldestMessage.id)
+            ? oldestMessage.id
+            : null;
+        const sourceMessages = [...pagedHistory].reverse();
         const analyzedMessages: UserChatAnalyzedMessage[] = [];
         const reportMessages: PrivateRamMessage[] = [];
 
@@ -4011,7 +4203,7 @@ app.post('/api/user/chats/:chatId/analyze', isAdmin, RL_USER_CHAT_ANALYZE, async
 
         const report =
           storageMode === 'ram'
-            ? readPrivateRamMessages(normalizedChatId, 250)?.report ??
+            ? readPrivateRamMessages(normalizedChatId, { limit: 200 })?.report ??
               buildThreatReportForMessages({
                 chatId: normalizedChatId,
                 chat: chatTitle,
@@ -4038,7 +4230,14 @@ app.post('/api/user/chats/:chatId/analyze', isAdmin, RL_USER_CHAT_ANALYZE, async
             avatar: null,
           }),
           scanned: analyzedMessages.length,
-          messages: analyzedMessages.sort((left, right) => right.messageTs - left.messageTs).slice(0, 250),
+          messages: analyzedMessages.sort((left, right) => right.messageTs - left.messageTs),
+          paging: {
+            requestedLimit: limit,
+            returned: analyzedMessages.length,
+            offsetId,
+            nextOffsetId,
+            hasMore,
+          },
           report,
         };
       }
