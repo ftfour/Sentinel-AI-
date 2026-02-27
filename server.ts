@@ -108,7 +108,9 @@ type TelegramChatSummary = {
   id: string;
   title: string;
   username: string | null;
-  type: 'group' | 'supergroup' | 'channel';
+  type: 'group' | 'supergroup' | 'channel' | 'private';
+  visibility: 'open' | 'closed';
+  storageMode: 'db' | 'ram';
   avatar: string | null;
 };
 type BotApiResponse<T> = {
@@ -182,6 +184,9 @@ const SESSION_AUTH_TTL_MS = 15 * 60 * 1000;
 const pendingSessionAuth = new Map<string, PendingSessionAuth>();
 const rateLimitStore = new Map<string, RateLimitEntry>();
 const alertCooldownStore = new Map<string, number>();
+const privateRamChatStore = new Map<string, PrivateRamChatState>();
+const PRIVATE_RAM_CHAT_LIMIT = 300;
+const PRIVATE_RAM_MESSAGES_PER_CHAT_LIMIT = 400;
 let smtpTransportCache: { key: string; transporter: Transporter } | null = null;
 let lastAlertConfigWarningAt = 0;
 
@@ -246,6 +251,53 @@ type StoredMessageInput = {
   text: string;
   type: ThreatType;
   score: number;
+};
+type PrivateRamRiskScores = Record<RiskCategory, number>;
+type PrivateRamMessage = {
+  id: string;
+  telegramMessageId: number | null;
+  chatId: string;
+  chat: string;
+  username: string | null;
+  type: TelegramChatSummary['type'];
+  visibility: TelegramChatSummary['visibility'];
+  sender: string;
+  text: string;
+  messageTs: number;
+  time: string;
+  source: 'live' | 'scan';
+  threatType: ThreatType;
+  score: number;
+  scores: PrivateRamRiskScores;
+  thresholds: PrivateRamRiskScores;
+};
+type PrivateRamChatState = {
+  chatId: string;
+  chat: string;
+  username: string | null;
+  type: TelegramChatSummary['type'];
+  visibility: TelegramChatSummary['visibility'];
+  points: number;
+  stats: StoredThreatStats;
+  messages: PrivateRamMessage[];
+  updatedAt: number;
+};
+type PrivateRamThreatReport = {
+  chatId: string;
+  chat: string;
+  totalMessages: number;
+  dangerousMessages: number;
+  dangerRatio: number;
+  points: number;
+  byType: StoredThreatStats;
+  topThreats: Array<{
+    threatType: ThreatType;
+    scorePercent: number;
+    sender: string;
+    time: string;
+    text: string;
+  }>;
+  summary: string;
 };
 type LabelScore = { label: string; score: number };
 type LocalOnnxOptions = {
@@ -478,6 +530,18 @@ function readThreatStats(): StoredThreatStats {
   return base;
 }
 
+function emptyThreatStats(): StoredThreatStats {
+  return {
+    safe: 0,
+    toxicity: 0,
+    threat: 0,
+    scam: 0,
+    recruitment: 0,
+    drugs: 0,
+    terrorism: 0,
+  };
+}
+
 function readDbStatus() {
   const summary = (selectDbSummaryStmt.get() as {
     total?: number;
@@ -540,6 +604,227 @@ function vacuumMessageDb(): void {
     console.error(`Failed to VACUUM DB: ${(error as Error).message}`);
     throw error;
   }
+}
+
+function toPrivateRamRiskScores(source: RiskScores): PrivateRamRiskScores {
+  return {
+    toxicity: Math.round(clamp01(source.toxicity) * 100),
+    threat: Math.round(clamp01(source.threat) * 100),
+    scam: Math.round(clamp01(source.scam) * 100),
+    recruitment: Math.round(clamp01(source.recruitment) * 100),
+    drugs: Math.round(clamp01(source.drugs) * 100),
+    terrorism: Math.round(clamp01(source.terrorism) * 100),
+  };
+}
+
+function ensurePrivateRamCapacity(): void {
+  if (privateRamChatStore.size < PRIVATE_RAM_CHAT_LIMIT) {
+    return;
+  }
+
+  let oldestKey: string | null = null;
+  let oldestUpdatedAt = Number.POSITIVE_INFINITY;
+  for (const [chatId, state] of privateRamChatStore.entries()) {
+    if (state.updatedAt < oldestUpdatedAt) {
+      oldestUpdatedAt = state.updatedAt;
+      oldestKey = chatId;
+    }
+  }
+  if (oldestKey) {
+    privateRamChatStore.delete(oldestKey);
+  }
+}
+
+function buildPrivateRamThreatReport(chatState: PrivateRamChatState): PrivateRamThreatReport {
+  const totalMessages = chatState.messages.length;
+  const dangerousMessages = chatState.messages.filter((message) => message.threatType !== 'safe').length;
+  const dangerRatio = totalMessages > 0 ? Math.round((dangerousMessages / totalMessages) * 1000) / 10 : 0;
+  const topThreats = chatState.messages
+    .filter((message) => message.threatType !== 'safe')
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 5)
+    .map((message) => ({
+      threatType: message.threatType,
+      scorePercent: Math.round(message.score * 100),
+      sender: message.sender,
+      time: message.time,
+      text: message.text.length > 280 ? `${message.text.slice(0, 280)}...` : message.text,
+    }));
+
+  let summary = 'Опасности не обнаружены в текущей RAM-выборке.';
+  if (dangerousMessages > 0) {
+    const dominantType = (Object.entries(chatState.stats) as Array<[ThreatType, number]>)
+      .filter(([key]) => key !== 'safe')
+      .sort((left, right) => right[1] - left[1])[0];
+    const dominantLabel = dominantType ? dominantType[0] : 'threat';
+    summary = `Обнаружено ${dangerousMessages} опасных сообщений из ${totalMessages}. Доминирующая категория: ${dominantLabel}. Накоплено очков: ${chatState.points}.`;
+  }
+
+  return {
+    chatId: chatState.chatId,
+    chat: chatState.chat,
+    totalMessages,
+    dangerousMessages,
+    dangerRatio,
+    points: chatState.points,
+    byType: { ...chatState.stats },
+    topThreats,
+    summary,
+  };
+}
+
+function upsertPrivateRamMessage(entry: {
+  telegramMessageId: number | null;
+  chatId: string;
+  chat: string;
+  username: string | null;
+  type: TelegramChatSummary['type'];
+  visibility: TelegramChatSummary['visibility'];
+  sender: string;
+  text: string;
+  messageTs: number;
+  source: 'live' | 'scan';
+  threatType: ThreatType;
+  score: number;
+  scores: RiskScores;
+  thresholds: RiskScores;
+}): PrivateRamMessage {
+  const normalizedChatId = entry.chatId.trim();
+  if (!normalizedChatId) {
+    throw new Error('chatId is required for RAM message storage');
+  }
+
+  if (!privateRamChatStore.has(normalizedChatId)) {
+    ensurePrivateRamCapacity();
+    privateRamChatStore.set(normalizedChatId, {
+      chatId: normalizedChatId,
+      chat: entry.chat,
+      username: entry.username,
+      type: entry.type,
+      visibility: entry.visibility,
+      points: 0,
+      stats: emptyThreatStats(),
+      messages: [],
+      updatedAt: Date.now(),
+    });
+  }
+
+  const chatState = privateRamChatStore.get(normalizedChatId)!;
+  chatState.chat = entry.chat;
+  chatState.username = entry.username;
+  chatState.type = entry.type;
+  chatState.visibility = entry.visibility;
+
+  const existingIndex =
+    entry.telegramMessageId !== null
+      ? chatState.messages.findIndex((message) => message.telegramMessageId === entry.telegramMessageId)
+      : -1;
+
+  const message: PrivateRamMessage = {
+    id:
+      existingIndex >= 0
+        ? chatState.messages[existingIndex].id
+        : `${normalizedChatId}:${entry.telegramMessageId ?? randomUUID()}`,
+    telegramMessageId: entry.telegramMessageId,
+    chatId: normalizedChatId,
+    chat: entry.chat,
+    username: entry.username,
+    type: entry.type,
+    visibility: entry.visibility,
+    sender: entry.sender,
+    text: entry.text,
+    messageTs: entry.messageTs,
+    time: new Date(entry.messageTs * 1000).toLocaleTimeString(),
+    source: entry.source,
+    threatType: entry.threatType,
+    score: clamp01(entry.score),
+    scores: toPrivateRamRiskScores(entry.scores),
+    thresholds: toPrivateRamRiskScores(entry.thresholds),
+  };
+
+  if (existingIndex >= 0) {
+    const previous = chatState.messages[existingIndex];
+    if (previous.threatType !== 'safe') {
+      chatState.points = Math.max(0, chatState.points - Math.max(1, Math.round(previous.score * 100)));
+    }
+    if (chatState.stats[previous.threatType] > 0) {
+      chatState.stats[previous.threatType] -= 1;
+    }
+    chatState.messages[existingIndex] = message;
+  } else {
+    chatState.messages.push(message);
+  }
+  if (message.threatType !== 'safe') {
+    chatState.points += Math.max(1, Math.round(message.score * 100));
+  }
+  chatState.stats[message.threatType] += 1;
+
+  if (chatState.messages.length > PRIVATE_RAM_MESSAGES_PER_CHAT_LIMIT) {
+    const overflow = chatState.messages.length - PRIVATE_RAM_MESSAGES_PER_CHAT_LIMIT;
+    chatState.messages.splice(0, overflow);
+  }
+
+  chatState.updatedAt = Date.now();
+  return message;
+}
+
+function readPrivateRamChats(limit = 100): Array<{
+  chatId: string;
+  chat: string;
+  username: string | null;
+  type: TelegramChatSummary['type'];
+  visibility: TelegramChatSummary['visibility'];
+  storageMode: TelegramChatSummary['storageMode'];
+  points: number;
+  totalMessages: number;
+  dangerousMessages: number;
+  byType: StoredThreatStats;
+  lastMessageAt: string | null;
+}> {
+  const safeLimit = Math.min(500, Math.max(1, Math.floor(limit)));
+  return Array.from(privateRamChatStore.values())
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, safeLimit)
+    .map((chatState) => {
+      const dangerousMessages = chatState.messages.filter((message) => message.threatType !== 'safe').length;
+      const lastMessage = chatState.messages[chatState.messages.length - 1];
+      return {
+        chatId: chatState.chatId,
+        chat: chatState.chat,
+        username: chatState.username,
+        type: chatState.type,
+        visibility: chatState.visibility,
+        storageMode: 'ram',
+        points: chatState.points,
+        totalMessages: chatState.messages.length,
+        dangerousMessages,
+        byType: { ...chatState.stats },
+        lastMessageAt: lastMessage ? new Date(lastMessage.messageTs * 1000).toISOString() : null,
+      };
+    });
+}
+
+function readPrivateRamMessages(chatId: string, limit = 120): {
+  chatId: string;
+  chat: string;
+  messages: PrivateRamMessage[];
+  report: PrivateRamThreatReport;
+} | null {
+  const normalizedChatId = chatId.trim();
+  const chatState = privateRamChatStore.get(normalizedChatId);
+  if (!chatState) {
+    return null;
+  }
+  const safeLimit = Math.min(500, Math.max(1, Math.floor(limit)));
+  const ordered = [...chatState.messages]
+    .sort((left, right) => right.messageTs - left.messageTs)
+    .slice(0, safeLimit);
+  return {
+    chatId: chatState.chatId,
+    chat: chatState.chat,
+    messages: ordered,
+    report: buildPrivateRamThreatReport(chatState),
+  };
 }
 
 const MODEL_CONFIGS: Record<string, ThreatModelConfig> = {
@@ -1478,6 +1763,9 @@ function isDialogsForbiddenForBot(error: unknown): boolean {
 
 function resolveChatType(dialog: any): TelegramChatSummary['type'] | null {
   if (!dialog) return null;
+  if (dialog.isUser) {
+    return 'private';
+  }
   if (dialog.isGroup) {
     return 'group';
   }
@@ -1509,6 +1797,102 @@ function resolveChatUsername(dialog: any): string | null {
     return username.trim();
   }
   return null;
+}
+
+function resolveEntityChatType(entity: unknown): TelegramChatSummary['type'] {
+  if (typeof entity !== 'object' || entity === null) {
+    return 'group';
+  }
+  const raw = entity as Record<string, unknown>;
+  const className = typeof raw.className === 'string' ? raw.className.toLowerCase() : '';
+
+  if (className.includes('user')) {
+    return 'private';
+  }
+  if (className.includes('channel')) {
+    if (raw.megagroup === true) return 'supergroup';
+    return 'channel';
+  }
+  if (className.includes('chat')) {
+    return 'group';
+  }
+  if (raw.megagroup === true) return 'supergroup';
+  if (raw.broadcast === true) return 'channel';
+  if (typeof raw.username === 'string' && raw.username.trim().length > 0 && raw.title === undefined) {
+    return 'private';
+  }
+  return 'group';
+}
+
+function resolveEntityChatTitle(entity: unknown, fallbackId: string): string {
+  if (typeof entity !== 'object' || entity === null) {
+    return `Chat ${fallbackId}`;
+  }
+  const raw = entity as Record<string, unknown>;
+  const titleCandidate = typeof raw.title === 'string' && raw.title.trim().length > 0
+    ? raw.title.trim()
+    : typeof raw.firstName === 'string' && raw.firstName.trim().length > 0
+      ? raw.firstName.trim()
+      : typeof raw.username === 'string' && raw.username.trim().length > 0
+        ? `@${raw.username.trim()}`
+        : '';
+  return titleCandidate || `Chat ${fallbackId}`;
+}
+
+function resolveEntityChatUsername(entity: unknown): string | null {
+  if (typeof entity !== 'object' || entity === null) {
+    return null;
+  }
+  const raw = entity as Record<string, unknown>;
+  const username = raw.username;
+  if (typeof username === 'string' && username.trim().length > 0) {
+    return username.trim();
+  }
+  return null;
+}
+
+function resolveChatVisibility(type: TelegramChatSummary['type'], username: string | null): TelegramChatSummary['visibility'] {
+  if (type === 'private') {
+    return 'closed';
+  }
+  if (username && username.trim().length > 0) {
+    return 'open';
+  }
+  return 'closed';
+}
+
+function resolveChatStorageMode(
+  authMode: TelegramAuthMode,
+  type: TelegramChatSummary['type'],
+  username: string | null
+): TelegramChatSummary['storageMode'] {
+  if (authMode === 'user') {
+    return resolveChatVisibility(type, username) === 'open' ? 'db' : 'ram';
+  }
+  return 'db';
+}
+
+function buildChatSummary(
+  authMode: TelegramAuthMode,
+  params: {
+    id: string;
+    title: string;
+    username: string | null;
+    type: TelegramChatSummary['type'];
+    avatar: string | null;
+  }
+): TelegramChatSummary {
+  const visibility = resolveChatVisibility(params.type, params.username);
+  const storageMode = resolveChatStorageMode(authMode, params.type, params.username);
+  return {
+    id: params.id,
+    title: params.title,
+    username: params.username,
+    type: params.type,
+    visibility,
+    storageMode,
+    avatar: params.avatar,
+  };
 }
 
 async function resolveChatAvatar(clientRef: TelegramClient, entity: unknown): Promise<string | null> {
@@ -1556,12 +1940,16 @@ async function callTelegramBotApi<T>(
 }
 
 function toTelegramChatType(value: unknown): TelegramChatSummary['type'] {
+  if (value === 'private') return 'private';
   if (value === 'channel') return 'channel';
   if (value === 'supergroup') return 'supergroup';
   return 'group';
 }
 
 function inferChatTypeFromId(chatId: string): TelegramChatSummary['type'] {
+  if (!chatId.startsWith('-')) {
+    return 'private';
+  }
   if (chatId.startsWith('-100')) {
     return 'supergroup';
   }
@@ -1653,31 +2041,38 @@ async function collectTelegramChatsViaBotApi(
       // keep update payload if getChat is unavailable
     }
 
-    chatsById.set(chatId, {
-      id: chatId,
-      title:
-        (typeof detailedChat.title === 'string' && detailedChat.title.trim()) ||
-        (typeof detailedChat.username === 'string' && `@${detailedChat.username.trim()}`) ||
-        `Chat ${chatId}`,
-      username:
-        typeof detailedChat.username === 'string' && detailedChat.username.trim().length > 0
-          ? detailedChat.username.trim()
-          : null,
-      type: toTelegramChatType(detailedChat.type),
-      avatar: await resolveBotApiChatAvatar(botToken, detailedChat),
-    });
+    const username =
+      typeof detailedChat.username === 'string' && detailedChat.username.trim().length > 0
+        ? detailedChat.username.trim()
+        : null;
+    chatsById.set(
+      chatId,
+      buildChatSummary('bot', {
+        id: chatId,
+        title:
+          (typeof detailedChat.title === 'string' && detailedChat.title.trim()) ||
+          (username ? `@${username}` : '') ||
+          `Chat ${chatId}`,
+        username,
+        type: toTelegramChatType(detailedChat.type),
+        avatar: await resolveBotApiChatAvatar(botToken, detailedChat),
+      })
+    );
   }
 
   for (const chatIdRaw of fallbackTargetChats) {
     const chatId = String(chatIdRaw).trim();
     if (!chatId || chatsById.has(chatId)) continue;
-    chatsById.set(chatId, {
-      id: chatId,
-      title: `Chat ${chatId}`,
-      username: null,
-      type: inferChatTypeFromId(chatId),
-      avatar: null,
-    });
+    chatsById.set(
+      chatId,
+      buildChatSummary('bot', {
+        id: chatId,
+        title: `Chat ${chatId}`,
+        username: null,
+        type: inferChatTypeFromId(chatId),
+        avatar: null,
+      })
+    );
   }
 
   return Array.from(chatsById.values()).sort((left, right) =>
@@ -1712,13 +2107,16 @@ async function collectTelegramChats(clientRef: TelegramClient): Promise<Telegram
     }
 
     knownChatIds.add(chatId);
-    chats.push({
-      id: chatId,
-      title: resolveChatTitle(dialog),
-      username: resolveChatUsername(dialog),
-      type: chatType,
-      avatar: dialog.entity ? await resolveChatAvatar(clientRef, dialog.entity) : null,
-    });
+    const username = resolveChatUsername(dialog);
+    chats.push(
+      buildChatSummary('user', {
+        id: chatId,
+        title: resolveChatTitle(dialog),
+        username,
+        type: chatType,
+        avatar: dialog.entity ? await resolveChatAvatar(clientRef, dialog.entity) : null,
+      })
+    );
 
     if (chats.length >= 120) {
       break;
@@ -1758,6 +2156,38 @@ async function runWithUserSessionClient<T>(
   } finally {
     await tempClient.disconnect().catch(() => undefined);
   }
+}
+
+function extractTelegramMessageText(message: any): string {
+  const directText = typeof message?.text === 'string' ? message.text : '';
+  if (directText.trim().length > 0) {
+    return directText;
+  }
+  const fallbackText = typeof message?.message === 'string' ? message.message : '';
+  if (fallbackText.trim().length > 0) {
+    return fallbackText;
+  }
+  return '';
+}
+
+async function resolveTelegramMessageSenderName(message: any): Promise<string> {
+  try {
+    const sender = await message.getSender();
+    if (sender && typeof sender === 'object') {
+      if ('username' in sender && typeof (sender as any).username === 'string' && (sender as any).username.trim().length > 0) {
+        return `@${(sender as any).username.trim()}`;
+      }
+      const firstName = 'firstName' in sender && typeof (sender as any).firstName === 'string' ? (sender as any).firstName.trim() : '';
+      const lastName = 'lastName' in sender && typeof (sender as any).lastName === 'string' ? (sender as any).lastName.trim() : '';
+      const fullName = `${firstName} ${lastName}`.trim();
+      if (fullName.length > 0) {
+        return fullName;
+      }
+    }
+  } catch {
+    // ignore sender resolution errors
+  }
+  return 'Unknown';
 }
 
 function applyPersistedSettings(settings: PersistedAppSettings): void {
@@ -1930,6 +2360,18 @@ const RL_DB_CONTROL = withRateLimit('db_control', {
   max: 6,
   cooldownMs: 20 * 1000,
   error: 'Too many DB control requests.',
+});
+const RL_PRIVATE_RAM_LIST = withRateLimit('private_ram_list', {
+  windowMs: 60 * 1000,
+  max: 120,
+  cooldownMs: 10 * 1000,
+  error: 'Private RAM feed polling is too frequent.',
+});
+const RL_PRIVATE_RAM_SCAN = withRateLimit('private_ram_scan', {
+  windowMs: 60 * 1000,
+  max: 6,
+  cooldownMs: 20 * 1000,
+  error: 'Private chat scan cooldown is active.',
 });
 
 // --- AUTH API ---
@@ -2983,33 +3425,60 @@ app.post('/api/start', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
     
     client.addEventHandler(async (event) => {
       const message = event.message;
-      const text = message.text || '';
+      const text = extractTelegramMessageText(message);
+      if (!text || text.trim().length === 0) {
+        return;
+      }
       
-      const sender = await message.getSender();
-      const senderName = sender && 'username' in sender && sender.username ? `@${sender.username}` : 'Unknown';
+      const senderName = await resolveTelegramMessageSenderName(message);
       
       const chat = await message.getChat();
-      const chatTitle = chat && 'title' in chat ? chat.title : 'Unknown Chat';
-      const chatId =
+      const normalizedChatId =
         chat && typeof chat === 'object' && 'id' in chat && (chat as any).id !== undefined
           ? String((chat as any).id)
-          : null;
+          : 'unknown-chat';
+      const chatType = resolveEntityChatType(chat);
+      const chatUsername = resolveEntityChatUsername(chat);
+      const chatTitle = resolveEntityChatTitle(chat, normalizedChatId);
+      const chatVisibility = resolveChatVisibility(chatType, chatUsername);
+      const chatStorageMode = resolveChatStorageMode(resolvedAuthMode, chatType, chatUsername);
+      const chatId = normalizedChatId === 'unknown-chat' ? null : normalizedChatId;
       const messageTs =
         typeof message.date === 'number' && Number.isFinite(message.date)
           ? Math.floor(message.date)
           : Math.floor(Date.now() / 1000);
+      const telegramMessageId = typeof message.id === 'number' && Number.isFinite(message.id) ? message.id : null;
       
-      const analysis = await analyzeThreat(text);
-      storeMessage({
-        telegramMessageId: typeof message.id === 'number' && Number.isFinite(message.id) ? message.id : null,
-        telegramChatId: chatId,
-        messageTs,
-        chat: chatTitle,
-        sender: senderName,
-        text,
-        type: analysis.type,
-        score: analysis.score,
-      });
+      const analysis = await analyzeThreatDetailed(text);
+      if (chatStorageMode === 'db') {
+        storeMessage({
+          telegramMessageId,
+          telegramChatId: chatId,
+          messageTs,
+          chat: chatTitle,
+          sender: senderName,
+          text,
+          type: analysis.type,
+          score: analysis.score,
+        });
+      } else {
+        upsertPrivateRamMessage({
+          telegramMessageId,
+          chatId: normalizedChatId,
+          chat: chatTitle,
+          username: chatUsername,
+          type: chatType,
+          visibility: chatVisibility,
+          sender: senderName,
+          text,
+          messageTs,
+          source: 'live',
+          threatType: analysis.type,
+          score: analysis.score,
+          scores: analysis.scores,
+          thresholds: analysis.thresholds,
+        });
+      }
 
       void sendThreatAlertEmail({
         type: analysis.type,
@@ -3019,7 +3488,7 @@ app.post('/api/start', isAdmin, RL_ENGINE_CONTROL, async (req, res) => {
         sender: senderName,
         messageTs,
         telegramChatId: chatId,
-        telegramMessageId: typeof message.id === 'number' && Number.isFinite(message.id) ? message.id : null,
+        telegramMessageId,
       }).catch((error) => {
         console.error(`Failed to send threat alert email: ${(error as Error).message}`);
       });
@@ -3091,6 +3560,154 @@ app.post('/api/db/vacuum', isAdmin, RL_DB_CONTROL, (_req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: `Failed to vacuum DB: ${(error as Error).message}` });
+  }
+});
+
+app.get('/api/user/private-chats', isAdmin, RL_PRIVATE_RAM_LIST, (req, res) => {
+  const limitRaw = Number(req.query?.limit ?? 100);
+  const limit = Number.isFinite(limitRaw) ? Math.floor(limitRaw) : 100;
+  res.json({
+    chats: readPrivateRamChats(limit),
+  });
+});
+
+app.get('/api/user/private-chats/:chatId/messages', isAdmin, RL_PRIVATE_RAM_LIST, (req, res) => {
+  const chatId = decodeURIComponent(toStringValue(req.params?.chatId, '')).trim();
+  if (!chatId) {
+    return res.status(400).json({ error: 'chatId is required' });
+  }
+
+  const limitRaw = Number(req.query?.limit ?? 120);
+  const limit = Number.isFinite(limitRaw) ? Math.floor(limitRaw) : 120;
+  const payload = readPrivateRamMessages(chatId, limit);
+  if (!payload) {
+    return res.status(404).json({ error: 'Chat is not present in RAM memory yet' });
+  }
+  res.json(payload);
+});
+
+app.post('/api/user/private-chats/:chatId/scan', isAdmin, RL_PRIVATE_RAM_SCAN, async (req, res) => {
+  const requestedChatId = decodeURIComponent(toStringValue(req.params?.chatId, '')).trim();
+  if (!requestedChatId) {
+    return res.status(400).json({ error: 'chatId is required' });
+  }
+
+  if (persistedSettings.authMode !== 'user') {
+    return res.status(400).json({ error: 'Switch auth mode to Telegram user session to scan private chats.' });
+  }
+
+  const apiId = parsePositiveInteger(persistedSettings.apiId);
+  const apiHash = persistedSettings.apiHash.trim();
+  const sessionString = persistedSettings.sessionString.trim();
+  if (!apiId || !apiHash || !sessionString) {
+    return res.status(400).json({ error: 'API ID, API Hash and Session String are required for private chat scan.' });
+  }
+
+  const limitRaw = Number(req.body?.limit ?? 80);
+  const limit = Number.isFinite(limitRaw) ? Math.min(250, Math.max(1, Math.floor(limitRaw))) : 80;
+
+  const reuseRunningClient =
+    !!client &&
+    isRunning &&
+    runtimeAuthMode === 'user' &&
+    persistedSettings.apiId === String(apiId) &&
+    persistedSettings.apiHash === apiHash &&
+    persistedSettings.sessionString === sessionString;
+
+  try {
+    const payload = await runWithUserSessionClient(
+      {
+        apiId,
+        apiHash,
+        sessionString,
+      },
+      reuseRunningClient,
+      async (clientRef) => {
+        const entity = await clientRef.getEntity(requestedChatId);
+        const normalizedChatId = String(await clientRef.getPeerId(entity as any));
+        const chatType = resolveEntityChatType(entity);
+        const chatUsername = resolveEntityChatUsername(entity);
+        const chatTitle = resolveEntityChatTitle(entity, normalizedChatId);
+        const visibility = resolveChatVisibility(chatType, chatUsername);
+        const storageMode = resolveChatStorageMode('user', chatType, chatUsername);
+
+        if (storageMode !== 'ram') {
+          throw new Error('This chat is public/open and is already persisted in database mode.');
+        }
+
+        const history = await clientRef.getMessages(entity as any, { limit });
+        const sourceMessages = Array.isArray(history) ? [...history].reverse() : [];
+        const analyzedMessages: PrivateRamMessage[] = [];
+
+        for (const telegramMessage of sourceMessages) {
+          const text = extractTelegramMessageText(telegramMessage);
+          if (!text || text.trim().length === 0) {
+            continue;
+          }
+
+          const messageTs =
+            typeof telegramMessage?.date === 'number' && Number.isFinite(telegramMessage.date)
+              ? Math.floor(telegramMessage.date)
+              : Math.floor(Date.now() / 1000);
+          const senderName = await resolveTelegramMessageSenderName(telegramMessage);
+          const analysis = await analyzeThreatDetailed(text);
+          const telegramMessageId =
+            typeof telegramMessage?.id === 'number' && Number.isFinite(telegramMessage.id)
+              ? telegramMessage.id
+              : null;
+
+          const stored = upsertPrivateRamMessage({
+            telegramMessageId,
+            chatId: normalizedChatId,
+            chat: chatTitle,
+            username: chatUsername,
+            type: chatType,
+            visibility,
+            sender: senderName,
+            text,
+            messageTs,
+            source: 'scan',
+            threatType: analysis.type,
+            score: analysis.score,
+            scores: analysis.scores,
+            thresholds: analysis.thresholds,
+          });
+          analyzedMessages.push(stored);
+        }
+
+        const ramPayload = readPrivateRamMessages(normalizedChatId, 200);
+        const report =
+          ramPayload?.report ??
+          buildPrivateRamThreatReport({
+            chatId: normalizedChatId,
+            chat: chatTitle,
+            username: chatUsername,
+            type: chatType,
+            visibility,
+            points: 0,
+            stats: emptyThreatStats(),
+            messages: [],
+            updatedAt: Date.now(),
+          });
+
+        return {
+          chat: buildChatSummary('user', {
+            id: normalizedChatId,
+            title: chatTitle,
+            username: chatUsername,
+            type: chatType,
+            avatar: null,
+          }),
+          scanned: analyzedMessages.length,
+          messages: analyzedMessages.sort((left, right) => right.messageTs - left.messageTs).slice(0, 150),
+          report,
+        };
+      }
+    );
+
+    res.json(payload);
+  } catch (error) {
+    res.status(500).json({ error: (error as Error).message });
   }
 });
 

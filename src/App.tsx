@@ -397,7 +397,9 @@ type AvailableTelegramChat = {
   id: string;
   title: string;
   username: string | null;
-  type: 'group' | 'supergroup' | 'channel';
+  type: 'group' | 'supergroup' | 'channel' | 'private';
+  visibility: 'open' | 'closed';
+  storageMode: 'db' | 'ram';
   avatar: string | null;
 };
 type ThreatLabel = 'safe' | 'toxicity' | 'threat' | 'scam' | 'recruitment' | 'drugs' | 'terrorism';
@@ -444,6 +446,54 @@ type DatabaseStatus = {
     firstReceivedAt: string | null;
     lastReceivedAt: string | null;
   };
+};
+type PrivateRamChatSummary = {
+  chatId: string;
+  chat: string;
+  username: string | null;
+  type: 'group' | 'supergroup' | 'channel' | 'private';
+  visibility: 'open' | 'closed';
+  storageMode: 'ram';
+  points: number;
+  totalMessages: number;
+  dangerousMessages: number;
+  byType: Record<ThreatLabel, number>;
+  lastMessageAt: string | null;
+};
+type PrivateRamMessage = {
+  id: string;
+  telegramMessageId: number | null;
+  chatId: string;
+  chat: string;
+  username: string | null;
+  type: 'group' | 'supergroup' | 'channel' | 'private';
+  visibility: 'open' | 'closed';
+  sender: string;
+  text: string;
+  messageTs: number;
+  time: string;
+  source: 'live' | 'scan';
+  threatType: ThreatLabel;
+  score: number;
+  scores: EngineRiskScores;
+  thresholds: EngineRiskScores;
+};
+type PrivateRamReport = {
+  chatId: string;
+  chat: string;
+  totalMessages: number;
+  dangerousMessages: number;
+  dangerRatio: number;
+  points: number;
+  byType: Record<ThreatLabel, number>;
+  topThreats: Array<{
+    threatType: ThreatLabel;
+    scorePercent: number;
+    sender: string;
+    time: string;
+    text: string;
+  }>;
+  summary: string;
 };
 type CooldownKey = 'saveSettings' | 'syncChats' | 'sessionCode' | 'sessionConfirm' | 'engineControl' | 'engineTest';
 type ActiveTab = 'dashboard' | 'dangers' | 'database' | 'agents' | 'engine' | 'engineTest' | 'proxy' | 'logs';
@@ -627,6 +677,13 @@ function SentinelApp() {
   const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
   const [isLoadingDbStatus, setIsLoadingDbStatus] = useState(false);
   const [dbAction, setDbAction] = useState<'clear' | 'vacuum' | null>(null);
+  const [privateRamChats, setPrivateRamChats] = useState<PrivateRamChatSummary[]>([]);
+  const [selectedPrivateChatId, setSelectedPrivateChatId] = useState('');
+  const [privateRamMessages, setPrivateRamMessages] = useState<PrivateRamMessage[]>([]);
+  const [privateRamReport, setPrivateRamReport] = useState<PrivateRamReport | null>(null);
+  const [isLoadingPrivateRam, setIsLoadingPrivateRam] = useState(false);
+  const [isScanningPrivateChat, setIsScanningPrivateChat] = useState(false);
+  const [privateScanLimit, setPrivateScanLimit] = useState(80);
   
   // Settings State
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
@@ -767,6 +824,51 @@ function SentinelApp() {
     }
     void refreshDbStatus(true);
   }, [activeTab, user.role]);
+
+  useEffect(() => {
+    if (activeTab !== 'agents' || user.role !== 'admin' || settings.authMode !== 'user') {
+      return;
+    }
+    void refreshPrivateRamChats(false);
+    const timer = setInterval(() => {
+      void refreshPrivateRamChats(false);
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [activeTab, user.role, settings.authMode]);
+
+  useEffect(() => {
+    if (activeTab !== 'agents' || user.role !== 'admin' || settings.authMode !== 'user') {
+      return;
+    }
+    if (!selectedPrivateChatId) {
+      setPrivateRamMessages([]);
+      setPrivateRamReport(null);
+      return;
+    }
+    if (!privateRamChats.some((chat) => chat.chatId === selectedPrivateChatId)) {
+      setPrivateRamMessages([]);
+      setPrivateRamReport(null);
+      return;
+    }
+    void loadPrivateRamChatMessages(selectedPrivateChatId, 160);
+  }, [activeTab, user.role, settings.authMode, selectedPrivateChatId, privateRamChats]);
+
+  useEffect(() => {
+    if (activeTab !== 'agents' || user.role !== 'admin' || settings.authMode !== 'user') {
+      return;
+    }
+    const optionsFromAvailable = availableChats.filter(
+      (chat) =>
+        chat.storageMode === 'ram' ||
+        chat.type === 'private' ||
+        chat.visibility === 'closed' ||
+        !chat.username
+    );
+    const firstChatId = optionsFromAvailable[0]?.id ?? privateRamChats[0]?.chatId ?? '';
+    if (!selectedPrivateChatId && firstChatId) {
+      setSelectedPrivateChatId(firstChatId);
+    }
+  }, [activeTab, user.role, settings.authMode, selectedPrivateChatId, availableChats, privateRamChats]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1017,9 +1119,11 @@ function SentinelApp() {
               title: typeof item.title === 'string' && item.title.trim().length > 0 ? item.title.trim() : 'Unknown Chat',
               username: typeof item.username === 'string' && item.username.trim().length > 0 ? item.username.trim() : null,
               type:
-                item.type === 'group' || item.type === 'supergroup' || item.type === 'channel'
+                item.type === 'group' || item.type === 'supergroup' || item.type === 'channel' || item.type === 'private'
                   ? item.type
                   : 'group',
+              visibility: item.visibility === 'open' ? 'open' : 'closed',
+              storageMode: item.storageMode === 'ram' ? 'ram' : 'db',
               avatar: typeof item.avatar === 'string' && item.avatar.length > 0 ? item.avatar : null,
             }))
         : [];
@@ -1035,6 +1139,158 @@ function SentinelApp() {
       }
     } finally {
       setIsLoadingAvailableChats(false);
+    }
+  };
+
+  const refreshPrivateRamChats = async (showNotification = false): Promise<void> => {
+    if (!user || user.role !== 'admin' || settings.authMode !== 'user') {
+      return;
+    }
+    setIsLoadingPrivateRam(true);
+
+    try {
+      const res = await fetch('/api/user/private-chats?limit=200');
+      if (!res.ok) {
+        if (res.status === 401) logout();
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload?.error ?? 'Failed to load RAM private chats');
+      }
+      const payload = await res.json();
+      const chats: PrivateRamChatSummary[] = Array.isArray(payload?.chats) ? payload.chats : [];
+      setPrivateRamChats(chats);
+
+      if (!selectedPrivateChatId && chats.length > 0) {
+        setSelectedPrivateChatId(chats[0].chatId);
+      }
+
+      if (selectedPrivateChatId && chats.every((chat) => chat.chatId !== selectedPrivateChatId)) {
+        setSelectedPrivateChatId(chats[0]?.chatId ?? '');
+      }
+    } catch (err) {
+      console.error('Failed to refresh private RAM chats', err);
+      if (showNotification) {
+        alert(`Failed to load RAM chats: ${(err as Error).message}`);
+      }
+    } finally {
+      setIsLoadingPrivateRam(false);
+    }
+  };
+
+  const loadPrivateRamChatMessages = async (chatId: string, limit = 120): Promise<void> => {
+    if (!chatId || !user || user.role !== 'admin' || settings.authMode !== 'user') {
+      return;
+    }
+
+    try {
+      const encodedChatId = encodeURIComponent(chatId);
+      const res = await fetch(`/api/user/private-chats/${encodedChatId}/messages?limit=${Math.max(1, Math.min(limit, 300))}`);
+      if (!res.ok) {
+        if (res.status === 401) logout();
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload?.error ?? 'Failed to load RAM chat messages');
+      }
+      const payload = await res.json();
+      const messages: PrivateRamMessage[] = Array.isArray(payload?.messages)
+        ? payload.messages.map((item: any) => ({
+            id: typeof item?.id === 'string' ? item.id : `${chatId}:${Math.random()}`,
+            telegramMessageId: typeof item?.telegramMessageId === 'number' ? item.telegramMessageId : null,
+            chatId: typeof item?.chatId === 'string' ? item.chatId : chatId,
+            chat: typeof item?.chat === 'string' ? item.chat : 'Unknown chat',
+            username: typeof item?.username === 'string' ? item.username : null,
+            type:
+              item?.type === 'group' || item?.type === 'supergroup' || item?.type === 'channel' || item?.type === 'private'
+                ? item.type
+                : 'group',
+            visibility: item?.visibility === 'open' ? 'open' : 'closed',
+            sender: typeof item?.sender === 'string' ? item.sender : 'Unknown',
+            text: typeof item?.text === 'string' ? item.text : '',
+            messageTs: numberOrFallback(item?.messageTs, 0),
+            time: typeof item?.time === 'string' ? item.time : '',
+            source: item?.source === 'scan' ? 'scan' : 'live',
+            threatType:
+              item?.threatType === 'safe' ||
+              item?.threatType === 'toxicity' ||
+              item?.threatType === 'threat' ||
+              item?.threatType === 'scam' ||
+              item?.threatType === 'recruitment' ||
+              item?.threatType === 'drugs' ||
+              item?.threatType === 'terrorism'
+                ? item.threatType
+                : 'safe',
+            score: Math.max(0, Math.min(1, numberOrFallback(item?.score, 0))),
+            scores: normalizeEngineScores(item?.scores),
+            thresholds: normalizeEngineScores(item?.thresholds),
+          }))
+        : [];
+      setPrivateRamMessages(messages);
+      setPrivateRamReport(payload?.report ?? null);
+    } catch (err) {
+      console.error('Failed to load RAM chat messages', err);
+    }
+  };
+
+  const scanPrivateChat = async (): Promise<void> => {
+    if (!selectedPrivateChatId || !user || user.role !== 'admin' || settings.authMode !== 'user') {
+      return;
+    }
+
+    setIsScanningPrivateChat(true);
+    try {
+      const encodedChatId = encodeURIComponent(selectedPrivateChatId);
+      const res = await fetch(`/api/user/private-chats/${encodedChatId}/scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          limit: Math.max(1, Math.min(privateScanLimit, 250)),
+        }),
+      });
+      const payload = await res.json();
+      if (!res.ok) {
+        if (res.status === 401) logout();
+        throw new Error(payload?.error ?? 'Failed to scan private chat');
+      }
+
+      const messages: PrivateRamMessage[] = Array.isArray(payload?.messages)
+        ? payload.messages.map((item: any) => ({
+            id: typeof item?.id === 'string' ? item.id : `${selectedPrivateChatId}:${Math.random()}`,
+            telegramMessageId: typeof item?.telegramMessageId === 'number' ? item.telegramMessageId : null,
+            chatId: typeof item?.chatId === 'string' ? item.chatId : selectedPrivateChatId,
+            chat: typeof item?.chat === 'string' ? item.chat : 'Unknown chat',
+            username: typeof item?.username === 'string' ? item.username : null,
+            type:
+              item?.type === 'group' || item?.type === 'supergroup' || item?.type === 'channel' || item?.type === 'private'
+                ? item.type
+                : 'group',
+            visibility: item?.visibility === 'open' ? 'open' : 'closed',
+            sender: typeof item?.sender === 'string' ? item.sender : 'Unknown',
+            text: typeof item?.text === 'string' ? item.text : '',
+            messageTs: numberOrFallback(item?.messageTs, 0),
+            time: typeof item?.time === 'string' ? item.time : '',
+            source: item?.source === 'scan' ? 'scan' : 'live',
+            threatType:
+              item?.threatType === 'safe' ||
+              item?.threatType === 'toxicity' ||
+              item?.threatType === 'threat' ||
+              item?.threatType === 'scam' ||
+              item?.threatType === 'recruitment' ||
+              item?.threatType === 'drugs' ||
+              item?.threatType === 'terrorism'
+                ? item.threatType
+                : 'safe',
+            score: Math.max(0, Math.min(1, numberOrFallback(item?.score, 0))),
+            scores: normalizeEngineScores(item?.scores),
+            thresholds: normalizeEngineScores(item?.thresholds),
+          }))
+        : [];
+
+      setPrivateRamMessages(messages);
+      setPrivateRamReport(payload?.report ?? null);
+      await refreshPrivateRamChats(false);
+    } catch (err) {
+      console.error('Failed to scan private chat', err);
+      alert(`Failed to scan private chat: ${(err as Error).message}`);
+    } finally {
+      setIsScanningPrivateChat(false);
     }
   };
 
@@ -1178,6 +1434,12 @@ function SentinelApp() {
     setSessionCode('');
     setSessionPassword('');
     setSessionNeedsPassword(false);
+    if (settings.authMode !== 'user') {
+      setPrivateRamChats([]);
+      setSelectedPrivateChatId('');
+      setPrivateRamMessages([]);
+      setPrivateRamReport(null);
+    }
   }, [settings.authMode]);
 
   const saveSettings = async (showNotification = true): Promise<boolean> => {
@@ -1533,6 +1795,27 @@ function SentinelApp() {
     0
   );
   const allAvailableSelected = availableChats.length > 0 && selectedAvailableCount === availableChats.length;
+  const ramEligibleChats = settings.authMode === 'user'
+    ? availableChats.filter(
+        (chat) =>
+          chat.storageMode === 'ram' ||
+          chat.type === 'private' ||
+          chat.visibility === 'closed' ||
+          !chat.username
+      )
+    : [];
+  const privateChatOptions = (() => {
+    const map = new Map<string, { chatId: string; label: string }>();
+    for (const chat of ramEligibleChats) {
+      map.set(chat.id, { chatId: chat.id, label: chat.title });
+    }
+    for (const chat of privateRamChats) {
+      if (!map.has(chat.chatId)) {
+        map.set(chat.chatId, { chatId: chat.chatId, label: chat.chat });
+      }
+    }
+    return Array.from(map.values());
+  })();
 
   // --- RENDERERS ---
   const renderDashboard = () => {
@@ -2218,9 +2501,23 @@ function SentinelApp() {
                                 {chat.username ? `@${chat.username}` : chat.id}
                               </div>
                             </div>
-                            <span className="text-[10px] uppercase tracking-wide text-slate-400 bg-slate-800/80 border border-slate-700 px-2 py-1 rounded">
-                              {chat.type}
-                            </span>
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] uppercase tracking-wide text-slate-400 bg-slate-800/80 border border-slate-700 px-2 py-1 rounded">
+                                {chat.type}
+                              </span>
+                              {settings.authMode === 'user' && (
+                                <span
+                                  className={cn(
+                                    "text-[10px] uppercase tracking-wide px-2 py-1 rounded border",
+                                    chat.storageMode === 'db'
+                                      ? "text-emerald-300 bg-emerald-500/10 border-emerald-500/20"
+                                      : "text-amber-300 bg-amber-500/10 border-amber-500/20"
+                                  )}
+                                >
+                                  {chat.storageMode}
+                                </span>
+                              )}
+                            </div>
                           </button>
                         </li>
                       );
@@ -2280,6 +2577,163 @@ function SentinelApp() {
                     </ul>
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+          )}
+          {section === 'agents' && settings.authMode === 'user' && (
+          <div className="lg:col-span-2 bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between">
+              <div className="flex items-center">
+                <AlertTriangle className="w-5 h-5 mr-3 text-amber-400" />
+                <h2 className="text-base font-semibold text-slate-200">Закрытые и личные чаты (RAM / очки)</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => void refreshPrivateRamChats(true)}
+                disabled={isLoadingPrivateRam || isScanningPrivateChat}
+                className={cn(
+                  "inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors",
+                  isLoadingPrivateRam || isScanningPrivateChat
+                    ? "border-slate-700 text-slate-500 cursor-not-allowed"
+                    : "border-amber-500/20 text-amber-300 hover:bg-amber-500/10"
+                )}
+              >
+                <RefreshCw className={cn("w-4 h-4", isLoadingPrivateRam && "animate-spin")} />
+                Обновить RAM
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
+                <div className="lg:col-span-3 space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Закрытый / личный чат</label>
+                  <select
+                    value={selectedPrivateChatId}
+                    onChange={(e) => setSelectedPrivateChatId(e.target.value)}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="">Выберите чат</option>
+                    {privateChatOptions.map((chat) => (
+                      <option key={chat.chatId} value={chat.chatId}>
+                        {chat.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Сообщений</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={250}
+                    value={privateScanLimit}
+                    onChange={(e) => setPrivateScanLimit(clampPercent(numberOrFallback(e.target.value, privateScanLimit), 1, 250))}
+                    className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Скан</label>
+                  <button
+                    type="button"
+                    onClick={() => void scanPrivateChat()}
+                    disabled={!selectedPrivateChatId || isScanningPrivateChat}
+                    className={cn(
+                      "w-full px-3 py-2.5 rounded-lg border text-sm transition-colors",
+                      !selectedPrivateChatId || isScanningPrivateChat
+                        ? "border-slate-700 text-slate-500 cursor-not-allowed"
+                        : "border-amber-500/20 text-amber-300 hover:bg-amber-500/10"
+                    )}
+                  >
+                    {isScanningPrivateChat ? 'Сканирование...' : 'Загрузить и анализировать'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
+                  <div className="text-xs text-slate-500 uppercase tracking-wider">RAM чатов</div>
+                  <div className="text-2xl text-slate-100 font-light mt-1">{privateRamChats.length}</div>
+                </div>
+                <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
+                  <div className="text-xs text-slate-500 uppercase tracking-wider">Очков (выбранный чат)</div>
+                  <div className="text-2xl text-amber-300 font-light mt-1">{privateRamReport?.points ?? 0}</div>
+                </div>
+                <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
+                  <div className="text-xs text-slate-500 uppercase tracking-wider">Опасных сообщений</div>
+                  <div className="text-2xl text-red-300 font-light mt-1">{privateRamReport?.dangerousMessages ?? 0}</div>
+                </div>
+              </div>
+
+              {privateRamChats.length > 0 && (
+                <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
+                  <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">Чаты в RAM</div>
+                  <div className="flex flex-wrap gap-2">
+                    {privateRamChats.slice(0, 18).map((chat) => (
+                      <button
+                        key={chat.chatId}
+                        type="button"
+                        onClick={() => setSelectedPrivateChatId(chat.chatId)}
+                        className={cn(
+                          "px-2.5 py-1.5 rounded-md border text-xs transition-colors",
+                          selectedPrivateChatId === chat.chatId
+                            ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
+                            : "border-slate-700 text-slate-300 hover:border-slate-600 hover:text-slate-200"
+                        )}
+                      >
+                        {chat.chat} • {chat.points} очк.
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {privateRamReport && (
+                <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4 space-y-3">
+                  <div className="text-sm text-slate-200">{privateRamReport.summary}</div>
+                  <div className="text-xs text-slate-400">
+                    Сообщений: {privateRamReport.totalMessages} • Опасных: {privateRamReport.dangerousMessages} • Риск: {privateRamReport.dangerRatio}%
+                  </div>
+                  {privateRamReport.topThreats.length > 0 && (
+                    <div className="space-y-2">
+                      {privateRamReport.topThreats.map((item, index) => (
+                        <div key={`${item.time}-${index}`} className="rounded border border-slate-800 bg-slate-900/40 p-2">
+                          <div className="text-xs text-slate-300">
+                            {THREAT_LABELS[item.threatType]} • {item.scorePercent}% • {item.sender} • {item.time}
+                          </div>
+                          <div className="text-xs text-slate-400 mt-1 break-words">{item.text}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-3">
+                <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">Сообщения закрытого чата</div>
+                <div className="max-h-[320px] overflow-y-auto custom-scrollbar space-y-2 pr-1">
+                  {privateRamMessages.length === 0 ? (
+                    <div className="text-slate-500 text-xs py-4 text-center">Нет данных. Выберите чат и запустите скан.</div>
+                  ) : (
+                    privateRamMessages.map((message) => (
+                      <div key={message.id} className="rounded border border-slate-800 bg-slate-900/40 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs text-slate-400">{message.time} • {message.sender}</div>
+                          <div className="text-xs text-slate-300">
+                            {THREAT_LABELS[message.threatType]} {Math.round(message.score * 100)}%
+                          </div>
+                        </div>
+                        <div className="text-sm text-slate-200 mt-1 break-words">{message.text}</div>
+                        <div className="text-[11px] text-slate-400 mt-2 grid grid-cols-2 md:grid-cols-3 gap-2">
+                          {ENGINE_RISK_KEYS.map((riskKey) => (
+                            <div key={`${message.id}-${riskKey}`}>
+                              {THREAT_LABELS[riskKey]} {message.scores[riskKey]}%
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           </div>
