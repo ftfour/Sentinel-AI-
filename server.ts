@@ -473,6 +473,14 @@ const DEFAULT_DRUG_TRIGGERS = [
   'доставка вещества',
 ];
 const DEFAULT_RECRUITMENT_TRIGGERS = [
+  'вербовка',
+  'ищем людей',
+  'закрытая группа',
+  'закрытую группу',
+  'подпольная ячейка',
+  'вступай в движение',
+  'нужны участники',
+  'радикальные действия',
   'recruit',
   'join the squad',
   'cell recruitment',
@@ -483,6 +491,11 @@ const DEFAULT_RECRUITMENT_TRIGGERS = [
   'tasks for members',
 ];
 const DEFAULT_TERRORISM_TRIGGERS = [
+  'теракт',
+  'взрывное устройство',
+  'массовое нападение',
+  'атака на объект',
+  'оружие для атаки',
   'terror attack',
   'explosion in public place',
   'attack on target',
@@ -634,11 +647,14 @@ const HEURISTIC_PATTERNS: Record<RiskCategory, RegExp[]> = {
     /\b(idiot|moron|trash|stupid|bitch|fuck|hate you)\b/i,
     /\binsult|abuse|humiliate\b/i,
     /\btoxic\b/i,
+    /(идиот|дебил|тварь|мразь|чмо|сука|урод|пидор)/i,
+    /(ненавижу|оскорблен|заткнись)/i,
   ],
   threat: [
     /\b(kill|shoot|stab|explode|bomb|attack|weapon)\b/i,
     /\bthreat|violence|harm\b/i,
     /\btarget\b/i,
+    /(убью|взорву|зарежу|расстреляю|угроз|бомб|оружие)/i,
   ],
   scam: [
     /\b(scam|fraud|phishing|ponzi|prepayment)\b/i,
@@ -647,42 +663,52 @@ const HEURISTIC_PATTERNS: Record<RiskCategory, RegExp[]> = {
     /cvv/i,
     /\bwallet connect\b/i,
     /\bguaranteed income|quick profit\b/i,
+    /(гарантированн(ый|ого) доход|быстрый заработок|предоплат|переведи|удвоим сумму|инвестиц)/i,
   ],
   recruitment: [
     /\brecruit|recruitment|join our (group|cell|team)\b/i,
     /\bnew members needed|closed community|underground group\b/i,
     /\bjoin movement|tasks for members|radical team\b/i,
+    /(вербовк|ищем людей|вступай|подпольн(ая|ую) ячейк|закрыт(ая|ую) групп|радикальн|нужны участники)/i,
   ],
   drugs: [
     /\b(drug|narcotic|stash|drop point|courier)\b/i,
     /\b(cocaine|heroin|amphetamine|meth|mdma|weed)\b/i,
     /\bdealer|selling\b/i,
+    /(наркотик|закладк|кладмен|мефедрон|кокаин|героин|амфетамин|продам)/i,
   ],
   terrorism: [
     /\b(terror|terrorism|extremist)\b/i,
     /\b(explosive|bomb assembly|attack plan)\b/i,
     /\b(public place attack|mass attack|maximize panic)\b/i,
+    /(теракт|взрывн(ое|ого) устройств|массов(ое|ого) нападени|атака на объект|ударим по толпе|максимальный ущерб)/i,
   ],
 };
 const CRITICAL_PATTERNS: Record<RiskCategory, Array<{ pattern: RegExp; score: number }>> = {
   toxicity: [
     { pattern: /\b(fuck|bitch|moron|idiot|trash)\b/i, score: 0.88 },
+    { pattern: /(идиот|дебил|тварь|мразь|чмо|сука|урод|пидор)/i, score: 0.94 },
   ],
   threat: [
     { pattern: /\b(kill|shoot|stab|bomb|explode|attack)\b/i, score: 0.92 },
+    { pattern: /(убью|взорву|зарежу|расстреляю|прямая угроза)/i, score: 0.96 },
   ],
   scam: [
     { pattern: /\b(scam|fraud|phishing|ponzi|fake investment)\b/i, score: 0.92 },
     { pattern: /\b(seed phrase|private key|passphrase|cvv|wallet connect)\b/i, score: 0.88 },
+    { pattern: /(гарантированн(ый|ого) доход|быстрый заработок|предоплат|удвоим сумму|переведи (деньги|оплату|usdt))/i, score: 0.94 },
   ],
   recruitment: [
     { pattern: /\b(recruitment|recruit|join our cell|new members needed)\b/i, score: 0.9 },
+    { pattern: /(вербовк|ищем людей|вступай в|подпольн(ая|ую) ячейк|закрыт(ую|ая) групп|радикальн)/i, score: 0.94 },
   ],
   drugs: [
     { pattern: /\b(drug|narcotic|cocaine|heroin|amphetamine|meth|mdma|stash)\b/i, score: 0.93 },
+    { pattern: /(продам|закладк|кладмен|мефедрон|кокаин|героин|амфетамин|наркотик)/i, score: 0.95 },
   ],
   terrorism: [
     { pattern: /\b(terrorism|terror attack|explosive device|mass attack)\b/i, score: 0.96 },
+    { pattern: /(теракт|взрывн(ое|ого) устройств|массов(ое|ого) нападени|атака на объект|оружие для атаки)/i, score: 0.97 },
   ],
 };
 
@@ -2153,6 +2179,26 @@ function blendScores(model: RiskScores, heuristic: RiskScores, config: RuntimeEn
   return blended;
 }
 
+function applyCriticalHeuristicOverride(
+  blended: RiskScores,
+  heuristic: RiskScores,
+  config: RuntimeEngineConfig
+): RiskScores {
+  const resolved = { ...blended };
+  if (!config.enableCriticalPatterns) {
+    return resolved;
+  }
+
+  // Keep explicit critical hits decisive even if model confidence is low.
+  for (const category of RISK_CATEGORIES) {
+    if (heuristic[category] >= config.criticalHitFloor) {
+      resolved[category] = Math.max(resolved[category], heuristic[category]);
+    }
+  }
+
+  return resolved;
+}
+
 async function analyzeThreatDetailed(
   text: string,
   sourceSettings: PersistedAppSettings = persistedSettings
@@ -2191,7 +2237,8 @@ async function analyzeThreatDetailed(
   for (const category of RISK_CATEGORIES) {
     modelAdjusted[category] = clamp01(model[category] * safeAttenuation);
   }
-  const combined = blendScores(modelAdjusted, heuristic, config);
+  const blended = blendScores(modelAdjusted, heuristic, config);
+  const combined = applyCriticalHeuristicOverride(blended, heuristic, config);
 
   const ranked = (Object.entries(combined) as [RiskCategory, number][])
     .sort((a, b) => b[1] - a[1]);
