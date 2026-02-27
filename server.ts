@@ -523,25 +523,62 @@ type EngineSelfTestCase = {
   expected: ThreatType;
   scenario: string;
 };
-type EngineSelfTestPreset = 'all' | 'recruitment' | 'drugs' | 'terrorism';
+type EngineSelfTestPreset =
+  | 'all'
+  | 'toxicity'
+  | 'threat'
+  | 'scam'
+  | 'recruitment'
+  | 'drugs'
+  | 'terrorism';
 const ENGINE_SELF_TEST_PRESETS: Record<Exclude<EngineSelfTestPreset, 'all'>, EngineSelfTestCase[]> = {
+  toxicity: [
+    { scenario: 'toxicity', expected: 'toxicity', text: 'Ты идиот и ничтожество, тебя все ненавидят.' },
+    { scenario: 'toxicity', expected: 'toxicity', text: 'Какой же ты дебил, закрой рот и исчезни.' },
+    { scenario: 'toxicity', expected: 'toxicity', text: 'Ты мразь и урод, с тобой противно общаться.' },
+    { scenario: 'toxicity', expected: 'toxicity', text: 'Это тупое чмо, которое ничего не умеет.' },
+  ],
+  threat: [
+    { scenario: 'threat', expected: 'threat', text: 'Я тебя убью, если еще раз напишешь.' },
+    { scenario: 'threat', expected: 'threat', text: 'Сегодня взорву ваш офис, это не шутка.' },
+    { scenario: 'threat', expected: 'threat', text: 'Зарежу тебя при встрече, готовься.' },
+    { scenario: 'threat', expected: 'threat', text: 'Это прямая угроза: ты получишь пулю.' },
+  ],
+  scam: [
+    {
+      scenario: 'scam',
+      expected: 'scam',
+      text: 'Гарантированный доход пятнадцать процентов в день, только сегодня.',
+    },
+    { scenario: 'scam', expected: 'scam', text: 'Сделай предоплату и получишь доступ к закрытой инвестиции.' },
+    { scenario: 'scam', expected: 'scam', text: 'Это не обман, переведи деньги сейчас и завтра удвоим сумму.' },
+    { scenario: 'scam', expected: 'scam', text: 'Быстрый заработок без риска, просто переведи оплату менеджеру.' },
+  ],
   recruitment: [
-    { scenario: 'recruitment', expected: 'recruitment', text: 'Join our closed cell, we need new members for operations.' },
-    { scenario: 'recruitment', expected: 'recruitment', text: 'Recruitment to underground group is open, DM for tasks.' },
-    { scenario: 'recruitment', expected: 'recruitment', text: 'Need motivated fighters, training and missions start immediately.' },
-    { scenario: 'recruitment', expected: 'recruitment', text: 'We are forming a radical team, only trusted people needed.' },
+    { scenario: 'recruitment', expected: 'recruitment', text: 'Ищем людей в закрытую группу для специальных задач.' },
+    {
+      scenario: 'recruitment',
+      expected: 'recruitment',
+      text: 'Нужны новые участники для подпольной ячейки, пиши в личку.',
+    },
+    { scenario: 'recruitment', expected: 'recruitment', text: 'Вступай в наше движение, обучение и задания дадим сразу.' },
+    {
+      scenario: 'recruitment',
+      expected: 'recruitment',
+      text: 'Собираем команду для радикальных действий, нужны проверенные люди.',
+    },
   ],
   drugs: [
-    { scenario: 'drugs', expected: 'drugs', text: 'Selling meph and amphetamine, fast delivery and hidden drop points.' },
-    { scenario: 'drugs', expected: 'drugs', text: 'Need a stash courier for daily drug drops, good payout.' },
-    { scenario: 'drugs', expected: 'drugs', text: 'Cocaine and mdma available, write for coordinates and price.' },
-    { scenario: 'drugs', expected: 'drugs', text: 'New stash location posted, payment first then coordinates.' },
+    { scenario: 'drugs', expected: 'drugs', text: 'Продам мефедрон, есть закладки по городу.' },
+    { scenario: 'drugs', expected: 'drugs', text: 'Нужен кладмен на ежедневные развозы вещества.' },
+    { scenario: 'drugs', expected: 'drugs', text: 'Есть кокаин и амфетамин, пишите за координатами.' },
+    { scenario: 'drugs', expected: 'drugs', text: 'Оплата вперед, потом отправлю адрес закладки.' },
   ],
   terrorism: [
-    { scenario: 'terrorism', expected: 'terrorism', text: 'Preparing an attack with explosives in a public location.' },
-    { scenario: 'terrorism', expected: 'terrorism', text: 'Need weapons and people for a terror operation this week.' },
-    { scenario: 'terrorism', expected: 'terrorism', text: 'Plan is to maximize panic and damage during the strike.' },
-    { scenario: 'terrorism', expected: 'terrorism', text: 'Instructions for bomb assembly and target timing will follow.' },
+    { scenario: 'terrorism', expected: 'terrorism', text: 'Готовим теракт в людном месте, нужен исполнитель.' },
+    { scenario: 'terrorism', expected: 'terrorism', text: 'Нужны люди и оружие для атаки на объект.' },
+    { scenario: 'terrorism', expected: 'terrorism', text: 'Соберем взрывное устройство и ударим по толпе.' },
+    { scenario: 'terrorism', expected: 'terrorism', text: 'Планируем массовое нападение, цель - максимальный ущерб.' },
   ],
 };
 const ENGINE_SELF_TEST_MESSAGES: EngineSelfTestCase[] = Object.values(ENGINE_SELF_TEST_PRESETS).flat();
@@ -2198,10 +2235,17 @@ app.post('/api/engine/test', isAdmin, RL_ENGINE_TEST, async (req, res) => {
     );
 
     const presetRaw = toStringValue(req.body?.preset, 'all').trim().toLowerCase();
-    const selectedPreset: EngineSelfTestPreset =
-      presetRaw === 'recruitment' || presetRaw === 'drugs' || presetRaw === 'terrorism'
-        ? presetRaw
-        : 'all';
+    const presetCandidates: Array<Exclude<EngineSelfTestPreset, 'all'>> = [
+      'toxicity',
+      'threat',
+      'scam',
+      'recruitment',
+      'drugs',
+      'terrorism',
+    ];
+    const selectedPreset: EngineSelfTestPreset = presetCandidates.includes(presetRaw as Exclude<EngineSelfTestPreset, 'all'>)
+      ? (presetRaw as Exclude<EngineSelfTestPreset, 'all'>)
+      : 'all';
 
     const incomingMessages = Array.isArray(req.body?.messages) ? req.body.messages : [];
     const customMessages = incomingMessages

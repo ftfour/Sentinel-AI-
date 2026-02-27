@@ -243,7 +243,14 @@ const ENGINE_RISK_KEYS: Array<keyof EngineRiskScores> = [
   'drugs',
   'terrorism',
 ];
-type EngineSelfTestPreset = 'all' | 'recruitment' | 'drugs' | 'terrorism';
+type EngineSelfTestPreset =
+  | 'all'
+  | 'toxicity'
+  | 'threat'
+  | 'scam'
+  | 'recruitment'
+  | 'drugs'
+  | 'terrorism';
 type EngineSelfTestCategory = Exclude<EngineSelfTestPreset, 'all'>;
 
 const ENGINE_SELF_TEST_PRESET_OPTIONS: Array<{
@@ -253,44 +260,77 @@ const ENGINE_SELF_TEST_PRESET_OPTIONS: Array<{
 }> = [
   {
     id: 'all',
-    label: 'All Categories',
-    description: 'Runs built-in messages from all preset categories.',
+    label: 'Все категории',
+    description: 'Запускает встроенный русскоязычный набор сообщений по всем категориям.',
+  },
+  {
+    id: 'toxicity',
+    label: 'Токсичность',
+    description: 'Оскорбления и унижающие формулировки.',
+  },
+  {
+    id: 'threat',
+    label: 'Угрозы',
+    description: 'Прямые угрозы насилия и причинения вреда.',
+  },
+  {
+    id: 'scam',
+    label: 'Мошенничество',
+    description: 'Обман, предоплата и обещания гарантированной прибыли.',
   },
   {
     id: 'recruitment',
-    label: 'Recruitment',
-    description: 'Messages about joining closed groups, cells, or coordinated teams.',
+    label: 'Вербовка',
+    description: 'Призывы вступать в закрытые и радикальные группы.',
   },
   {
     id: 'drugs',
-    label: 'Drugs',
-    description: 'Messages about selling narcotics, stash drops, and courier tasks.',
+    label: 'Наркотики',
+    description: 'Продажа веществ, закладки и координация с курьерами.',
   },
   {
     id: 'terrorism',
-    label: 'Terrorism',
-    description: 'Messages about attacks, explosives, and violent extremist actions.',
+    label: 'Терроризм',
+    description: 'Подготовка атак, взрывов и экстремистских действий.',
   },
 ];
 
 const SELF_TEST_PRESET_MESSAGES: Record<EngineSelfTestCategory, string[]> = {
+  toxicity: [
+    'Ты идиот и ничтожество, тебя все ненавидят.',
+    'Какой же ты дебил, закрой рот и исчезни.',
+    'Ты мразь и урод, с тобой противно общаться.',
+    'Это тупое чмо, которое ничего не умеет.',
+  ],
+  threat: [
+    'Я тебя убью, если еще раз напишешь.',
+    'Сегодня взорву ваш офис, это не шутка.',
+    'Зарежу тебя при встрече, готовься.',
+    'Это прямая угроза: ты получишь пулю.',
+  ],
+  scam: [
+    'Гарантированный доход пятнадцать процентов в день, только сегодня.',
+    'Сделай предоплату и получишь доступ к закрытой инвестиции.',
+    'Это не обман, переведи деньги сейчас и завтра удвоим сумму.',
+    'Быстрый заработок без риска, просто переведи оплату менеджеру.',
+  ],
   recruitment: [
-    'Join our closed cell, we need new members for operations.',
-    'Recruitment to underground group is open, DM for tasks.',
-    'Need motivated fighters, training and missions start immediately.',
-    'We are forming a radical team, only trusted people needed.',
+    'Ищем людей в закрытую группу для специальных задач.',
+    'Нужны новые участники для подпольной ячейки, пиши в личку.',
+    'Вступай в наше движение, обучение и задания дадим сразу.',
+    'Собираем команду для радикальных действий, нужны проверенные люди.',
   ],
   drugs: [
-    'Selling meph and amphetamine, fast delivery and hidden drop points.',
-    'Need a stash courier for daily drug drops, good payout.',
-    'Cocaine and mdma available, write for coordinates and price.',
-    'New stash location posted, payment first then coordinates.',
+    'Продам мефедрон, есть закладки по городу.',
+    'Нужен кладмен на ежедневные развозы вещества.',
+    'Есть кокаин и амфетамин, пишите за координатами.',
+    'Оплата вперед, потом отправлю адрес закладки.',
   ],
   terrorism: [
-    'Preparing an attack with explosives in a public location.',
-    'Need weapons and people for a terror operation this week.',
-    'Plan is to maximize panic and damage during the strike.',
-    'Instructions for bomb assembly and target timing will follow.',
+    'Готовим теракт в людном месте, нужен исполнитель.',
+    'Нужны люди и оружие для атаки на объект.',
+    'Соберем взрывное устройство и ударим по толпе.',
+    'Планируем массовое нападение, цель - максимальный ущерб.',
   ],
 };
 
@@ -371,7 +411,7 @@ type EngineTestResult = {
   thresholds: EngineRiskScores;
 };
 type CooldownKey = 'saveSettings' | 'syncChats' | 'sessionCode' | 'sessionConfirm' | 'engineControl' | 'engineTest';
-type ActiveTab = 'dashboard' | 'agents' | 'engine' | 'proxy' | 'logs';
+type ActiveTab = 'dashboard' | 'agents' | 'engine' | 'engineTest' | 'proxy' | 'logs';
 
 const DEFAULT_SETTINGS: SettingsState = {
   apiId: '',
@@ -575,8 +615,8 @@ function SentinelApp() {
     ENGINE_SELF_TEST_PRESET_OPTIONS[0];
   const lastUsedEnginePresetLabel =
     engineTestUsedPreset === 'custom'
-      ? 'Custom messages'
-      : (ENGINE_SELF_TEST_PRESET_OPTIONS.find((preset) => preset.id === engineTestUsedPreset)?.label ?? 'Unknown');
+      ? 'Пользовательские сообщения'
+      : (ENGINE_SELF_TEST_PRESET_OPTIONS.find((preset) => preset.id === engineTestUsedPreset)?.label ?? 'Неизвестно');
   const availableChats = availableChatsByMode[settings.authMode];
 
   // --- DATA FETCHING ---
@@ -1151,7 +1191,7 @@ function SentinelApp() {
         if (cooldownSeconds > 0) {
           startCooldown('engineTest', cooldownSeconds);
         }
-        throw new Error(data?.error ?? 'Engine self-test failed');
+        throw new Error(data?.error ?? 'Тест движка завершился с ошибкой');
       }
 
       const results: EngineTestResult[] = Array.isArray(data?.results)
@@ -1198,6 +1238,9 @@ function SentinelApp() {
       const normalizedUsedPreset: EngineSelfTestPreset | 'custom' =
         usedPresetRaw === 'custom' ||
         usedPresetRaw === 'all' ||
+        usedPresetRaw === 'toxicity' ||
+        usedPresetRaw === 'threat' ||
+        usedPresetRaw === 'scam' ||
         usedPresetRaw === 'recruitment' ||
         usedPresetRaw === 'drugs' ||
         usedPresetRaw === 'terrorism'
@@ -1208,7 +1251,7 @@ function SentinelApp() {
       setEngineTestUsedPreset(normalizedUsedPreset);
     } catch (error) {
       console.error('Failed to run engine self-test', error);
-      alert(`Engine self-test failed: ${(error as Error).message}`);
+      alert(`Ошибка теста движка: ${(error as Error).message}`);
     } finally {
       setIsRunningEngineTest(false);
     }
@@ -1468,7 +1511,7 @@ function SentinelApp() {
     );
   };
 
-  const renderSettings = (section: 'agents' | 'engine' | 'proxy') => {
+  const renderSettings = (section: 'agents' | 'engine' | 'engineTest' | 'proxy') => {
     if (user.role !== 'admin') return null;
     return (
       <div className="space-y-6 animate-in fade-in duration-300 max-w-5xl mx-auto pb-12">
@@ -2017,8 +2060,10 @@ function SentinelApp() {
         </div>
         )}
 
-        {section === 'engine' && (
+        {(section === 'engine' || section === 'engineTest') && (
         <div className="space-y-6">
+          {section === 'engine' && (
+          <>
           <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center">
               <Cpu className="w-5 h-5 mr-3 text-violet-400" />
@@ -2263,9 +2308,13 @@ function SentinelApp() {
             </div>
           </div>
 
+          </>
+          )}
+
+          {section === 'engineTest' && (
           <div className="bg-[#111113] border border-slate-800 rounded-xl shadow-sm overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-800 bg-slate-900/30 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-200">Engine self-test</h3>
+              <h3 className="text-sm font-semibold text-slate-200">Тест движка</h3>
               <button
                 type="button"
                 onClick={() => void runEngineSelfTest()}
@@ -2278,16 +2327,16 @@ function SentinelApp() {
                 )}
               >
                 {isRunningEngineTest
-                  ? 'Running...'
+                  ? 'Запуск...'
                   : cooldowns.engineTest > 0
-                    ? 'Cooldown ' + cooldownText('engineTest')
-                    : 'Run Self-Test'}
+                    ? 'КД ' + cooldownText('engineTest')
+                    : 'Запустить тест'}
               </button>
             </div>
             <div className="p-6 space-y-4">
               <div className="rounded-lg border border-slate-800 bg-[#0A0A0B] p-4 space-y-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Built-in dataset preset</label>
+                  <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Встроенный набор тестов</label>
                   <p className="text-[11px] text-slate-500">{selectedEnginePreset.description}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -2319,20 +2368,20 @@ function SentinelApp() {
                     }}
                     className="px-2.5 py-1.5 rounded-md border border-slate-700 text-xs text-slate-300 hover:border-slate-600 hover:text-slate-200 transition-colors"
                   >
-                    Load preset into custom input
+                    Загрузить набор в поле ниже
                   </button>
                   <button
                     type="button"
                     onClick={() => setEngineTestInput('')}
                     className="px-2.5 py-1.5 rounded-md border border-slate-700 text-xs text-slate-300 hover:border-slate-600 hover:text-slate-200 transition-colors"
                   >
-                    Clear custom input
+                    Очистить поле
                   </button>
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Preset messages by category</label>
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Сообщения по категориям</label>
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                   {(Object.entries(SELF_TEST_PRESET_MESSAGES) as Array<[EngineSelfTestCategory, string[]]>).map(
                     ([category, presetMessages]) => (
@@ -2341,7 +2390,7 @@ function SentinelApp() {
                           <span className="text-xs font-medium text-slate-200">
                             {ENGINE_SELF_TEST_PRESET_OPTIONS.find((preset) => preset.id === category)?.label ?? category}
                           </span>
-                          <span className="text-[11px] text-slate-500">{presetMessages.length} msgs</span>
+                          <span className="text-[11px] text-slate-500">{presetMessages.length} шт.</span>
                         </div>
                         <div className="mt-2 space-y-1">
                           {presetMessages.map((message, presetIndex) => (
@@ -2357,18 +2406,18 @@ function SentinelApp() {
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Custom test messages (optional)</label>
+                <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Пользовательские сообщения (необязательно)</label>
                 <textarea
                   rows={5}
                   value={engineTestInput}
                   onChange={(e) => setEngineTestInput(e.target.value)}
                   className="w-full bg-[#0A0A0B] border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-violet-500 font-mono"
-                  placeholder={'One message per line. If this field is empty, selected preset dataset is used.'}
+                  placeholder={'Одно сообщение на строку. Если поле пустое, используется выбранный встроенный набор.'}
                 />
                 <p className="text-[11px] text-slate-500">
                   {engineTestUsedDefaultSet
-                    ? `Last run used preset dataset: ${lastUsedEnginePresetLabel}.`
-                    : 'Last run used custom messages from this field.'}
+                    ? `Последний запуск использовал набор: ${lastUsedEnginePresetLabel}.`
+                    : 'Последний запуск использовал сообщения из этого поля.'}
                 </p>
               </div>
 
@@ -2391,13 +2440,13 @@ function SentinelApp() {
                         <span className="text-xs text-slate-200 font-mono">{result.type} {result.confidence}%</span>
                       </div>
                       {result.expected && (
-                        <div className="text-[11px] text-slate-500 mt-1">Expected: {result.expected}</div>
+                        <div className="text-[11px] text-slate-500 mt-1">Ожидалось: {result.expected}</div>
                       )}
                       <pre className="mt-2 text-xs text-slate-300 whitespace-pre-wrap break-words font-sans">{result.text}</pre>
                       <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px] text-slate-400">
                         {ENGINE_RISK_KEYS.map((riskKey) => (
                           <div key={`${result.text}-${riskKey}`}>
-                            {THREAT_LABELS[riskKey]} {result.scores[riskKey]}% / thr {result.thresholds[riskKey]}%
+                            {THREAT_LABELS[riskKey]} {result.scores[riskKey]}% / порог {result.thresholds[riskKey]}%
                           </div>
                         ))}
                       </div>
@@ -2407,10 +2456,12 @@ function SentinelApp() {
               )}
             </div>
           </div>
+          )}
         </div>
         )}
 
         {/* Save Button */}
+        {section !== 'engineTest' && (
         <div className="flex justify-end pt-4">
           <button
             onClick={() => void saveSettings(true)}
@@ -2430,6 +2481,7 @@ function SentinelApp() {
                 : 'Сохранить конфигурацию'}
           </button>
         </div>
+        )}
       </div>
     );
   };
@@ -2477,6 +2529,15 @@ function SentinelApp() {
                 <Cpu className="w-4 h-4 mr-3" /> {'\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430 \u0434\u0432\u0438\u0436\u043a\u0430'}
               </button>
               <button
+                onClick={() => setActiveTab('engineTest')}
+                className={cn(
+                  "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  activeTab === 'engineTest' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                )}
+              >
+                <Terminal className="w-4 h-4 mr-3" /> {'\u0422\u0435\u0441\u0442 \u0434\u0432\u0438\u0436\u043a\u0430'}
+              </button>
+              <button
                 onClick={() => setActiveTab('proxy')}
                 className={cn(
                   "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
@@ -2514,7 +2575,7 @@ function SentinelApp() {
         {/* Header */}
         <header className="h-16 border-b border-slate-800/60 bg-[#0A0A0B]/80 backdrop-blur-md flex items-center justify-between px-8 sticky top-0 z-10">
           <h2 className="text-lg font-medium text-slate-100 capitalize">
-            {activeTab === 'dashboard' ? 'Панель' : activeTab === 'agents' ? 'Агенты' : activeTab === 'engine' ? 'Настройка движка' : activeTab === 'proxy' ? 'Прокси' : 'Системные журналы'}
+            {activeTab === 'dashboard' ? 'Панель' : activeTab === 'agents' ? 'Агенты' : activeTab === 'engine' ? 'Настройка движка' : activeTab === 'engineTest' ? 'Тест движка' : activeTab === 'proxy' ? 'Прокси' : 'Системные журналы'}
           </h2>
           
           <div className="flex items-center space-x-4">
@@ -2553,6 +2614,7 @@ function SentinelApp() {
           {activeTab === 'dashboard' && renderDashboard()}
           {activeTab === 'agents' && renderSettings('agents')}
           {activeTab === 'engine' && renderSettings('engine')}
+          {activeTab === 'engineTest' && renderSettings('engineTest')}
           {activeTab === 'proxy' && renderSettings('proxy')}
           {activeTab === 'logs' && (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-4">
