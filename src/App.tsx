@@ -1016,6 +1016,13 @@ function PublicThreatBoard() {
                 Обновить
               </button>
               <Link
+                to="/presentation"
+                className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 transition-colors"
+              >
+                <FileText className="w-4 h-4 mr-2" />
+                Презентация проекта
+              </Link>
+              <Link
                 to={user ? '/app' : '/login'}
                 className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
               >
@@ -1132,6 +1139,234 @@ function PublicThreatBoard() {
             Ошибка загрузки публичной панели: {error}
           </section>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ProjectPresentationPage() {
+  const solvedProblems = [
+    {
+      title: 'Информационная перегрузка',
+      description:
+        'Операторы и модераторы не успевают вручную проверять поток сообщений в крупных чатах и каналах.',
+    },
+    {
+      title: 'Скрытые формулировки угроз',
+      description:
+        'Опасный контент маскируется сленгом, намеками и обходом ключевых слов, из-за чего простые фильтры дают пропуски.',
+    },
+    {
+      title: 'Медленная реакция на инциденты',
+      description:
+        'Без автоматизации сигналы о скаме, угрозах и вербовке попадают к ответственным командам с опозданием.',
+    },
+    {
+      title: 'Риски при обработке данных',
+      description:
+        'При работе с чувствительными чатами нужна архитектура с минимальным хранением и контролируемым контуром обработки.',
+    },
+  ];
+
+  const targetAudience = [
+    'Службы корпоративной безопасности и compliance-команды.',
+    'Администраторы Telegram-сообществ (в том числе crypto/fintech) для защиты от скама и токсичности.',
+    'OSINT-аналитики и исследовательские центры, работающие с открытыми источниками.',
+    'Гос- и правоохранительные структуры в рамках законных сценариев мониторинга.',
+  ];
+
+  const architectureBlocks = [
+    {
+      title: 'Frontend + API в одном контуре',
+      details:
+        'Монолитный Node.js процесс поднимает React интерфейс и Express API, что упрощает эксплуатацию MVP.',
+    },
+    {
+      title: 'Подключение к Telegram',
+      details:
+        'Поддерживаются Bot API и User session (MTProto), поэтому доступны сценарии для публичных и закрытых источников.',
+    },
+    {
+      title: 'Гибридный движок анализа',
+      details:
+        'Классификация строится на комбинации ML-моделей и эвристик/триггеров по категориям: threat, scam, drugs, recruitment, terrorism, toxicity.',
+    },
+    {
+      title: 'Контур хранения',
+      details:
+        'Для открытых данных используется SQLite, для чувствительных сценариев доступен RAM-only режим без долговременного архива переписки.',
+    },
+  ];
+
+  const technologies = [
+    'TypeScript + Node.js 22',
+    'Express + express-session + rate limit',
+    'React 19 + Vite 6 + Tailwind CSS',
+    'Telegram client (GramJS/telegram)',
+    '@huggingface/transformers + ONNX модели',
+    'SQLite (better-sqlite3) + RAM режим',
+    'SMTP (nodemailer) для алертов и отчетов',
+  ];
+
+  const prototypeStructure = [
+    'Публичная панель потока сообщений и категории угроз без авторизации.',
+    'Ролевая авторизация: admin и viewer.',
+    'Админ-панель с настройкой Telegram, прокси, порогов и триггеров.',
+    'Встроенный раздел тестирования движка на русскоязычных тест-кейсах.',
+    'Подготовка отчетов и отправка по email через SMTP.',
+  ];
+
+  const userFlow = [
+    'Администратор входит в систему и открывает /app.',
+    'Подключает Telegram (bot или user session) и выбирает целевые чаты.',
+    'Настраивает пороги, триггеры, модель и параметры движка.',
+    'Запускает мониторинг и получает классифицированные события в реальном времени.',
+    'Фильтрует инциденты, готовит отчет и отправляет его ответственным по SMTP.',
+  ];
+
+  const legalBackground = [
+    'Архитектура ориентирована на минимизацию хранения чувствительных данных (RAM-only для приватных сценариев).',
+    'Инференс выполняется локально, без обязательной отправки текстов во внешние AI-сервисы.',
+    'Для публичных источников возможен OSINT-сценарий, для закрытых требуется законный доступ пользователя к чату.',
+    'Важно: юридическая оценка зависит от юрисдикции и регламентов организации; перед эксплуатацией нужен комплаенс-аудит.',
+  ];
+
+  return (
+    <div className="min-h-screen bg-[#05070b] text-slate-100">
+      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_15%_20%,rgba(56,189,248,0.18),transparent_36%),radial-gradient(circle_at_85%_0%,rgba(99,102,241,0.2),transparent_42%)]" />
+
+      <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-10 space-y-6">
+        <header className="rounded-2xl border border-slate-800 bg-[#0d1017]/90 backdrop-blur p-6 md:p-8">
+          <div className="inline-flex items-center px-3 py-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 text-xs font-medium tracking-wide mb-4">
+            <Shield className="w-3.5 h-3.5 mr-2" />
+            Sentinel AI · Проектная презентация
+          </div>
+          <h1 className="text-3xl md:text-4xl font-semibold tracking-tight">Презентационная страница проекта</h1>
+          <p className="text-slate-300 mt-3 max-w-4xl">
+            Это отдельный маршрут с короткой структурированной презентацией: от проблематики и целевой аудитории до архитектуры,
+            User Flow и юридической подоплеки.
+          </p>
+
+          <div className="mt-6 flex flex-wrap gap-2">
+            <Link
+              to="/"
+              className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium border border-slate-700 bg-slate-900/70 text-slate-200 hover:bg-slate-800 transition-colors"
+            >
+              <Activity className="w-4 h-4 mr-2" />
+              Публичная панель
+            </Link>
+            <Link
+              to="/login"
+              className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+            >
+              <Lock className="w-4 h-4 mr-2" />
+              Войти в админку
+            </Link>
+          </div>
+        </header>
+
+        <section className="rounded-2xl border border-slate-800 bg-[#10131b]/80 p-5 md:p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <AlertTriangle className="w-4 h-4 text-amber-300" />
+            <h2 className="text-lg font-semibold">Какие проблемы решает проект</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {solvedProblems.map((problem) => (
+              <article key={problem.title} className="rounded-lg border border-slate-800 bg-slate-900/55 p-4">
+                <h3 className="text-sm font-medium text-slate-100">{problem.title}</h3>
+                <p className="text-sm text-slate-300 mt-2 leading-relaxed">{problem.description}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-[#10131b]/80 p-5 md:p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Globe className="w-4 h-4 text-cyan-300" />
+            <h2 className="text-lg font-semibold">Кто является целевой аудиторией</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {targetAudience.map((item) => (
+              <div key={item} className="rounded-lg border border-slate-800 bg-slate-900/55 p-4 text-sm text-slate-200">
+                {item}
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-[#10131b]/80 p-5 md:p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Cpu className="w-4 h-4 text-indigo-300" />
+            <h2 className="text-lg font-semibold">Архитектура системы и технологии</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+            {architectureBlocks.map((block) => (
+              <article key={block.title} className="rounded-lg border border-slate-800 bg-slate-900/55 p-4">
+                <h3 className="text-sm font-medium text-slate-100">{block.title}</h3>
+                <p className="text-sm text-slate-300 mt-2 leading-relaxed">{block.details}</p>
+              </article>
+            ))}
+          </div>
+          <div className="rounded-lg border border-slate-800 bg-slate-900/55 p-4">
+            <h3 className="text-sm font-medium text-slate-100 mb-3">Технологический стек</h3>
+            <div className="flex flex-wrap gap-2">
+              {technologies.map((tech) => (
+                <span key={tech} className="text-xs px-2.5 py-1 rounded-full border border-slate-700 bg-slate-950/60 text-slate-300">
+                  {tech}
+                </span>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="rounded-2xl border border-slate-800 bg-[#10131b]/80 p-5 md:p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Database className="w-4 h-4 text-violet-300" />
+              <h2 className="text-lg font-semibold">Как устроен прототип проекта</h2>
+            </div>
+            <div className="space-y-3">
+              {prototypeStructure.map((item, index) => (
+                <div key={item} className="rounded-lg border border-slate-800 bg-slate-900/55 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Блок {index + 1}</div>
+                  <p className="text-sm text-slate-200">{item}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-800 bg-[#10131b]/80 p-5 md:p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <LinkIcon className="w-4 h-4 text-emerald-300" />
+              <h2 className="text-lg font-semibold">User Flow</h2>
+            </div>
+            <div className="space-y-3">
+              {userFlow.map((item, index) => (
+                <div key={item} className="rounded-lg border border-slate-800 bg-slate-900/55 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Шаг {index + 1}</div>
+                  <p className="text-sm text-slate-200">{item}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5 md:p-6 mb-8">
+          <div className="flex items-center gap-2 mb-4">
+            <FileText className="w-4 h-4 text-amber-300" />
+            <h2 className="text-lg font-semibold">Юридическая подоплека</h2>
+          </div>
+          <div className="space-y-2">
+            {legalBackground.map((item) => (
+              <div key={item} className="rounded-lg border border-amber-500/20 bg-[#10131b]/70 p-3 text-sm text-slate-200">
+                {item}
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-slate-400 mt-4">
+            Материал носит информационный характер и не заменяет юридическую консультацию.
+          </p>
+        </section>
       </div>
     </div>
   );
@@ -5089,6 +5324,7 @@ export default function App() {
       <Router>
         <Routes>
           <Route path="/" element={<PublicThreatBoard />} />
+          <Route path="/presentation" element={<ProjectPresentationPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route element={<PrivateRoute />}>
             <Route path="/app" element={<SentinelApp />} />
