@@ -323,10 +323,42 @@ const selectRecentMessagesStmt = messageDb.prepare(`
   LIMIT ?
 `);
 
+const selectDangerMessagesStmt = messageDb.prepare(`
+  SELECT
+    id,
+    telegram_message_id AS telegramMessageId,
+    telegram_chat_id AS telegramChatId,
+    message_ts AS messageTs,
+    chat,
+    sender,
+    text,
+    type,
+    score
+  FROM messages
+  WHERE type != 'safe'
+  ORDER BY received_ts DESC
+  LIMIT ?
+`);
+
 const selectThreatStatsStmt = messageDb.prepare(`
   SELECT type, COUNT(*) AS total
   FROM messages
   GROUP BY type
+`);
+
+const selectDbSummaryStmt = messageDb.prepare(`
+  SELECT
+    COUNT(*) AS total,
+    SUM(CASE WHEN type != 'safe' THEN 1 ELSE 0 END) AS dangers,
+    MIN(message_ts) AS firstMessageTs,
+    MAX(message_ts) AS lastMessageTs,
+    MIN(received_ts) AS firstReceivedTs,
+    MAX(received_ts) AS lastReceivedTs
+  FROM messages
+`);
+
+const deleteAllMessagesStmt = messageDb.prepare(`
+  DELETE FROM messages
 `);
 
 function storeMessage(entry: StoredMessageInput): void {
@@ -356,11 +388,40 @@ function readRecentMessages(limit = MAX_RECENT_MESSAGES): Array<{
   type: ThreatType;
   score: number;
 }> {
-  const safeLimit = Math.min(1000, Math.max(1, Math.floor(limit)));
-  const rows = selectRecentMessagesStmt.all(safeLimit) as StoredMessageRow[];
-  return rows.map((row) => {
+  const rowToMessage = (row: StoredMessageRow) => {
     const messageTs = Number.isFinite(row.messageTs) ? row.messageTs : Math.floor(Date.now() / 1000);
     const messageType = THREAT_TYPES.includes(row.type as ThreatType) ? (row.type as ThreatType) : 'safe';
+    return {
+      id: row.id,
+      time: new Date(messageTs * 1000).toLocaleTimeString(),
+      chat: row.chat,
+      sender: row.sender,
+      text: row.text,
+      type: messageType,
+      score: clamp01(row.score),
+    };
+  };
+
+  const safeLimit = Math.min(1000, Math.max(1, Math.floor(limit)));
+  const rows = selectRecentMessagesStmt.all(safeLimit) as StoredMessageRow[];
+  return rows.map(rowToMessage);
+}
+
+function readDangerMessages(limit = MAX_RECENT_MESSAGES): Array<{
+  id: number;
+  time: string;
+  chat: string;
+  sender: string;
+  text: string;
+  type: ThreatType;
+  score: number;
+}> {
+  const safeLimit = Math.min(1000, Math.max(1, Math.floor(limit)));
+  const rows = selectDangerMessagesStmt.all(safeLimit) as StoredMessageRow[];
+  return rows.map((row) => {
+    const messageTs = Number.isFinite(row.messageTs) ? row.messageTs : Math.floor(Date.now() / 1000);
+    const rawType = THREAT_TYPES.includes(row.type as ThreatType) ? (row.type as ThreatType) : 'safe';
+    const messageType: ThreatType = rawType === 'safe' ? 'threat' : rawType;
     return {
       id: row.id,
       time: new Date(messageTs * 1000).toLocaleTimeString(),
@@ -390,6 +451,70 @@ function readThreatStats(): StoredThreatStats {
     }
   }
   return base;
+}
+
+function readDbStatus() {
+  const summary = (selectDbSummaryStmt.get() as {
+    total?: number;
+    dangers?: number;
+    firstMessageTs?: number | null;
+    lastMessageTs?: number | null;
+    firstReceivedTs?: number | null;
+    lastReceivedTs?: number | null;
+  } | undefined) ?? {};
+  const byType = readThreatStats();
+  const total = Number(summary.total) || 0;
+  const dangers = Number(summary.dangers) || 0;
+  const fileExists = fs.existsSync(MESSAGES_DB_FILE);
+  let fileSizeBytes = 0;
+  if (fileExists) {
+    try {
+      fileSizeBytes = fs.statSync(MESSAGES_DB_FILE).size;
+    } catch (error) {
+      console.error(`Failed to read DB file size: ${(error as Error).message}`);
+    }
+  }
+
+  const firstMessageTs = Number(summary.firstMessageTs);
+  const lastMessageTs = Number(summary.lastMessageTs);
+  const firstReceivedTs = Number(summary.firstReceivedTs);
+  const lastReceivedTs = Number(summary.lastReceivedTs);
+
+  return {
+    file: {
+      path: MESSAGES_DB_FILE,
+      exists: fileExists,
+      sizeBytes: fileSizeBytes,
+    },
+    messages: {
+      total,
+      dangers,
+      byType,
+      firstMessageAt: Number.isFinite(firstMessageTs) && firstMessageTs > 0 ? new Date(firstMessageTs * 1000).toISOString() : null,
+      lastMessageAt: Number.isFinite(lastMessageTs) && lastMessageTs > 0 ? new Date(lastMessageTs * 1000).toISOString() : null,
+      firstReceivedAt: Number.isFinite(firstReceivedTs) && firstReceivedTs > 0 ? new Date(firstReceivedTs).toISOString() : null,
+      lastReceivedAt: Number.isFinite(lastReceivedTs) && lastReceivedTs > 0 ? new Date(lastReceivedTs).toISOString() : null,
+    },
+  };
+}
+
+function clearMessageHistory(): number {
+  const result = deleteAllMessagesStmt.run();
+  try {
+    messageDb.pragma('wal_checkpoint(TRUNCATE)');
+  } catch (error) {
+    console.error(`Failed to checkpoint DB after clear: ${(error as Error).message}`);
+  }
+  return Number(result.changes) || 0;
+}
+
+function vacuumMessageDb(): void {
+  try {
+    messageDb.exec('VACUUM');
+  } catch (error) {
+    console.error(`Failed to VACUUM DB: ${(error as Error).message}`);
+    throw error;
+  }
 }
 
 const MODEL_CONFIGS: Record<string, ThreatModelConfig> = {
@@ -1588,6 +1713,24 @@ const RL_STATS = withRateLimit('stats', {
   cooldownMs: 10 * 1000,
   error: 'Stats polling is too frequent.',
 });
+const RL_DANGERS = withRateLimit('dangers', {
+  windowMs: 60 * 1000,
+  max: 180,
+  cooldownMs: 10 * 1000,
+  error: 'Danger feed polling is too frequent.',
+});
+const RL_DB_STATUS = withRateLimit('db_status', {
+  windowMs: 60 * 1000,
+  max: 60,
+  cooldownMs: 10 * 1000,
+  error: 'DB status polling is too frequent.',
+});
+const RL_DB_CONTROL = withRateLimit('db_control', {
+  windowMs: 60 * 1000,
+  max: 6,
+  cooldownMs: 20 * 1000,
+  error: 'Too many DB control requests.',
+});
 
 // --- AUTH API ---
 app.post('/api/login', RL_LOGIN, (req, res) => {
@@ -2705,6 +2848,37 @@ app.get('/api/messages', isAuthenticated, RL_MESSAGES, (req, res) => {
 
 app.get('/api/stats', isAuthenticated, RL_STATS, (req, res) => {
   res.json(readThreatStats());
+});
+
+app.get('/api/dangers', isAuthenticated, RL_DANGERS, (req, res) => {
+  const limitRaw = Number(req.query?.limit ?? MAX_RECENT_MESSAGES);
+  const limit = Number.isFinite(limitRaw) ? Math.floor(limitRaw) : MAX_RECENT_MESSAGES;
+  res.json(readDangerMessages(limit));
+});
+
+app.get('/api/db/status', isAdmin, RL_DB_STATUS, (_req, res) => {
+  res.json(readDbStatus());
+});
+
+app.post('/api/db/clear', isAdmin, RL_DB_CONTROL, (_req, res) => {
+  const removed = clearMessageHistory();
+  res.json({
+    status: 'cleared',
+    removed,
+    db: readDbStatus(),
+  });
+});
+
+app.post('/api/db/vacuum', isAdmin, RL_DB_CONTROL, (_req, res) => {
+  try {
+    vacuumMessageDb();
+    res.json({
+      status: 'vacuumed',
+      db: readDbStatus(),
+    });
+  } catch (error) {
+    res.status(500).json({ error: `Failed to vacuum DB: ${(error as Error).message}` });
+  }
 });
 
 async function startServer() {

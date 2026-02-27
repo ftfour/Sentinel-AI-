@@ -88,13 +88,13 @@ const THREAT_COLORS = {
   terrorism: '#dc2626', // red-600
 };
 const THREAT_LABELS = {
-  safe: 'Safe',
-  toxicity: 'Toxicity',
-  threat: 'Threat',
-  scam: 'Scam',
-  recruitment: 'Recruitment',
-  drugs: 'Drugs',
-  terrorism: 'Terrorism',
+  safe: 'Безопасно',
+  toxicity: 'Токсичность',
+  threat: 'Угроза',
+  scam: 'Скам',
+  recruitment: 'Вербовка',
+  drugs: 'Наркотики',
+  terrorism: 'Терроризм',
 } as const;
 
 type ModelOption = {
@@ -410,8 +410,33 @@ type EngineTestResult = {
   modelScores: EngineRiskScores;
   thresholds: EngineRiskScores;
 };
+type FeedMessage = {
+  id: number;
+  time: string;
+  chat: string;
+  sender: string;
+  text: string;
+  type: ThreatLabel;
+  score: number;
+};
+type DatabaseStatus = {
+  file: {
+    path: string;
+    exists: boolean;
+    sizeBytes: number;
+  };
+  messages: {
+    total: number;
+    dangers: number;
+    byType: Record<ThreatLabel, number>;
+    firstMessageAt: string | null;
+    lastMessageAt: string | null;
+    firstReceivedAt: string | null;
+    lastReceivedAt: string | null;
+  };
+};
 type CooldownKey = 'saveSettings' | 'syncChats' | 'sessionCode' | 'sessionConfirm' | 'engineControl' | 'engineTest';
-type ActiveTab = 'dashboard' | 'agents' | 'engine' | 'engineTest' | 'proxy' | 'logs';
+type ActiveTab = 'dashboard' | 'dangers' | 'database' | 'agents' | 'engine' | 'engineTest' | 'proxy' | 'logs';
 
 const DEFAULT_SETTINGS: SettingsState = {
   apiId: '',
@@ -568,7 +593,8 @@ function SentinelApp() {
   const [isRunning, setIsRunning] = useState(false);
   
   // Dashboard State
-  const [messages, setMessages] = useState<any[]>([]);
+  const [messages, setMessages] = useState<FeedMessage[]>([]);
+  const [dangerMessages, setDangerMessages] = useState<FeedMessage[]>([]);
   const [stats, setStats] = useState<Record<ThreatLabel, number>>({
     safe: 0,
     toxicity: 0,
@@ -578,6 +604,9 @@ function SentinelApp() {
     drugs: 0,
     terrorism: 0,
   });
+  const [dbStatus, setDbStatus] = useState<DatabaseStatus | null>(null);
+  const [isLoadingDbStatus, setIsLoadingDbStatus] = useState(false);
+  const [dbAction, setDbAction] = useState<'clear' | 'vacuum' | null>(null);
   
   // Settings State
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
@@ -618,11 +647,77 @@ function SentinelApp() {
       ? 'Пользовательские сообщения'
       : (ENGINE_SELF_TEST_PRESET_OPTIONS.find((preset) => preset.id === engineTestUsedPreset)?.label ?? 'Неизвестно');
   const availableChats = availableChatsByMode[settings.authMode];
-
   // --- DATA FETCHING ---
+  const applyStatsPayload = (statsData: any) => {
+    setStats((prev) => ({
+      ...prev,
+      safe: numberOrFallback(statsData?.safe, prev.safe),
+      toxicity: numberOrFallback(statsData?.toxicity, prev.toxicity),
+      threat: numberOrFallback(statsData?.threat, prev.threat),
+      scam: numberOrFallback(statsData?.scam, prev.scam),
+      recruitment: numberOrFallback(statsData?.recruitment, prev.recruitment),
+      drugs: numberOrFallback(statsData?.drugs, prev.drugs),
+      terrorism: numberOrFallback(statsData?.terrorism, prev.terrorism),
+    }));
+  };
+
+  const refreshDbStatus = async (showLoader = false): Promise<void> => {
+    if (user.role !== 'admin') {
+      return;
+    }
+
+    if (showLoader) {
+      setIsLoadingDbStatus(true);
+    }
+
+    try {
+      const res = await fetch('/api/db/status');
+      if (!res.ok) {
+        if (res.status === 401) logout();
+        return;
+      }
+      const payload = await res.json();
+      setDbStatus(payload);
+    } catch (err) {
+      console.error('Failed to fetch database status', err);
+    } finally {
+      if (showLoader) {
+        setIsLoadingDbStatus(false);
+      }
+    }
+  };
+
+  const refreshFeeds = async (): Promise<void> => {
+    const [msgRes, statsRes, dangerRes] = await Promise.all([
+      fetch('/api/messages'),
+      fetch('/api/stats'),
+      fetch('/api/dangers'),
+    ]);
+
+    if (msgRes.status === 401 || statsRes.status === 401 || dangerRes.status === 401) {
+      logout();
+      return;
+    }
+
+    if (msgRes.ok) {
+      const msgData = await msgRes.json();
+      setMessages(Array.isArray(msgData) ? msgData : []);
+    }
+
+    if (statsRes.ok) {
+      const statsData = await statsRes.json();
+      applyStatsPayload(statsData);
+    }
+
+    if (dangerRes.ok) {
+      const dangerData = await dangerRes.json();
+      setDangerMessages(Array.isArray(dangerData) ? dangerData : []);
+    }
+  };
+
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    
+
     const checkStatus = async () => {
       try {
         const res = await fetch('/api/status');
@@ -631,36 +726,27 @@ function SentinelApp() {
           return;
         }
         const data = await res.json();
-        setIsRunning(data.isRunning);
-        
-        if (data.isRunning) {
-          const msgRes = await fetch('/api/messages');
-          const msgData = await msgRes.json();
-          setMessages(msgData);
-          
-          const statsRes = await fetch('/api/stats');
-          const statsData = await statsRes.json();
-          setStats((prev) => ({
-            ...prev,
-            safe: numberOrFallback(statsData?.safe, prev.safe),
-            toxicity: numberOrFallback(statsData?.toxicity, prev.toxicity),
-            threat: numberOrFallback(statsData?.threat, prev.threat),
-            scam: numberOrFallback(statsData?.scam, prev.scam),
-            recruitment: numberOrFallback(statsData?.recruitment, prev.recruitment),
-            drugs: numberOrFallback(statsData?.drugs, prev.drugs),
-            terrorism: numberOrFallback(statsData?.terrorism, prev.terrorism),
-          }));
-        }
+        setIsRunning(Boolean(data?.isRunning));
+        await refreshFeeds();
       } catch (err) {
-        console.error('Не удалось получить статус', err);
+        console.error('Failed to fetch engine status', err);
       }
     };
 
-    checkStatus();
-    interval = setInterval(checkStatus, 2000);
-    
+    void checkStatus();
+    interval = setInterval(() => {
+      void checkStatus();
+    }, 2000);
+
     return () => clearInterval(interval);
   }, [logout]);
+
+  useEffect(() => {
+    if (activeTab !== 'database' || user.role !== 'admin') {
+      return;
+    }
+    void refreshDbStatus(true);
+  }, [activeTab, user.role]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -1332,6 +1418,74 @@ function SentinelApp() {
     setSettings(s => ({ ...s, keywords: s.keywords.filter(k => k !== kw) }));
   };
 
+  const formatDbTimestamp = (value: string | null): string => {
+    if (!value) return '—';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '—';
+    return parsed.toLocaleString('ru-RU');
+  };
+
+  const formatBytes = (bytes: number): string => {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let value = bytes;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex += 1;
+    }
+    const digits = unitIndex === 0 ? 0 : 2;
+    return `${value.toFixed(digits)} ${units[unitIndex]}`;
+  };
+
+  const runDbAction = async (action: 'clear' | 'vacuum'): Promise<void> => {
+    if (user.role !== 'admin' || dbAction) return;
+    setDbAction(action);
+    try {
+      const endpoint = action === 'clear' ? '/api/db/clear' : '/api/db/vacuum';
+      const res = await fetch(endpoint, { method: 'POST' });
+      const payload = await res.json();
+      if (res.status === 401) {
+        logout();
+        return;
+      }
+      if (!res.ok) {
+        alert(payload?.error ?? 'Не удалось выполнить операцию с базой данных');
+        return;
+      }
+      if (payload?.db) {
+        setDbStatus(payload.db);
+        applyStatsPayload(payload.db?.messages?.byType ?? {});
+      } else {
+        await refreshDbStatus(false);
+      }
+      if (action === 'clear') {
+        setMessages([]);
+        setDangerMessages([]);
+        alert('История сообщений очищена');
+      } else {
+        alert('Оптимизация базы данных завершена');
+      }
+    } catch (err) {
+      console.error('DB control action failed', err);
+      alert(`Ошибка управления БД: ${(err as Error).message}`);
+    } finally {
+      setDbAction(null);
+    }
+  };
+
+  const handleClearDatabase = () => {
+    if (dbAction) return;
+    const confirmed = window.confirm('Удалить все сохраненные сообщения из базы данных?');
+    if (!confirmed) return;
+    void runDbAction('clear');
+  };
+
+  const handleVacuumDatabase = () => {
+    if (dbAction) return;
+    void runDbAction('vacuum');
+  };
+
   const availableChatIds = new Set(availableChats.map((chat) => chat.id));
   const manualTargetChats = settings.targetChats.filter((chatId) => !availableChatIds.has(chatId));
   const selectedAvailableCount = availableChats.reduce(
@@ -1505,6 +1659,246 @@ function SentinelApp() {
                 </ResponsiveContainer>
               )}
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDangers = () => {
+    const explicitThreats = dangerMessages.filter((msg) => msg.type === 'threat');
+    const otherDangerMessages = dangerMessages.filter((msg) => msg.type !== 'threat');
+    const dangerByType = dangerMessages.reduce(
+      (acc, msg) => {
+        acc[msg.type] += 1;
+        return acc;
+      },
+      {
+        safe: 0,
+        toxicity: 0,
+        threat: 0,
+        scam: 0,
+        recruitment: 0,
+        drugs: 0,
+        terrorism: 0,
+      } as Record<ThreatLabel, number>
+    );
+
+    const renderDangerMessage = (msg: FeedMessage) => {
+      const text = typeof msg.text === 'string' ? msg.text.trim() : '';
+      const normalizedText = text.length > 0 ? text : '[Нет текста]';
+      return (
+        <div
+          key={msg.id}
+          className="group flex flex-col p-3 hover:bg-slate-800/30 rounded-lg transition-colors border border-transparent hover:border-slate-800/50"
+        >
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center space-x-2 text-xs font-mono text-slate-400">
+              <span className="text-slate-500">{msg.time}</span>
+              <span className="text-indigo-400">{msg.chat}</span>
+              <span className="text-slate-500">→</span>
+              <span className="text-slate-300">{msg.sender}</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <span className="text-[10px] font-mono text-slate-500">Уверенность: {(msg.score * 100).toFixed(0)}%</span>
+              <span
+                className={cn(
+                  'text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full font-semibold',
+                  msg.type === 'toxicity' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                  msg.type === 'threat' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                  msg.type === 'recruitment' ? 'bg-sky-500/10 text-sky-400 border border-sky-500/20' :
+                  msg.type === 'drugs' ? 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20' :
+                  msg.type === 'terrorism' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                  'bg-violet-500/10 text-violet-400 border border-violet-500/20'
+                )}
+              >
+                {THREAT_LABELS[msg.type]}
+              </span>
+            </div>
+          </div>
+          <p className="text-sm text-slate-300 leading-relaxed break-words">{normalizedText}</p>
+        </div>
+      );
+    };
+
+    return (
+      <div className="space-y-6 animate-in fade-in duration-300">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-slate-400 text-sm font-medium">Всего опасных сообщений</span>
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+            </div>
+            <div className="text-3xl font-light text-slate-100">{dangerMessages.length}</div>
+          </div>
+          <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-slate-400 text-sm font-medium">Явные угрозы</span>
+              <AlertTriangle className="w-4 h-4 text-red-400" />
+            </div>
+            <div className="text-3xl font-light text-slate-100">{explicitThreats.length}</div>
+          </div>
+          <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 shadow-sm">
+            <div className="text-slate-400 text-sm font-medium mb-2">Топ категорий</div>
+            <div className="space-y-1 text-sm">
+              {(['scam', 'toxicity', 'recruitment', 'drugs', 'terrorism'] as ThreatLabel[]).map((type) => (
+                <div key={type} className="flex items-center justify-between text-slate-300">
+                  <span>{THREAT_LABELS[type]}</span>
+                  <span className="font-mono text-slate-400">{dangerByType[type]}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div className="bg-[#111113] border border-slate-800 rounded-xl flex flex-col h-[560px] shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/20">
+              <h3 className="text-sm font-semibold text-slate-200 flex items-center">
+                <AlertTriangle className="w-4 h-4 mr-2 text-red-400" /> Явные угрозы (категория threat)
+              </h3>
+              <span className="text-xs font-mono text-red-400">{explicitThreats.length}</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+              {explicitThreats.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-slate-500 text-sm font-mono">
+                  Явные угрозы пока не обнаружены
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {explicitThreats.map(renderDangerMessage)}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="bg-[#111113] border border-slate-800 rounded-xl flex flex-col h-[560px] shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/20">
+              <h3 className="text-sm font-semibold text-slate-200 flex items-center">
+                <MessageSquare className="w-4 h-4 mr-2 text-amber-400" /> Прочие опасные категории
+              </h3>
+              <span className="text-xs font-mono text-amber-300">{otherDangerMessages.length}</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+              {otherDangerMessages.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-slate-500 text-sm font-mono">
+                  Нет сообщений других опасных категорий
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {otherDangerMessages.map(renderDangerMessage)}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDatabase = () => {
+    if (user.role !== 'admin') {
+      return (
+        <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-4">
+          <Database className="w-12 h-12 opacity-20" />
+          <p className="font-mono text-sm">Доступно только для администратора.</p>
+        </div>
+      );
+    }
+
+    const byType = dbStatus?.messages?.byType ?? stats;
+    const total = numberOrFallback(dbStatus?.messages?.total, 0);
+    const dangers = numberOrFallback(dbStatus?.messages?.dangers, 0);
+
+    return (
+      <div className="space-y-6 animate-in fade-in duration-300 max-w-5xl mx-auto pb-12">
+        <div className="bg-[#111113] border border-slate-800 rounded-xl p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h3 className="text-base font-semibold text-slate-200 flex items-center">
+              <Database className="w-4 h-4 mr-2 text-indigo-400" /> Управление базой сообщений
+            </h3>
+            <button
+              onClick={() => void refreshDbStatus(true)}
+              disabled={isLoadingDbStatus || dbAction !== null}
+              className={cn(
+                'px-3 py-2 rounded-lg text-xs font-medium border transition-colors flex items-center',
+                isLoadingDbStatus || dbAction !== null
+                  ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
+                  : 'bg-slate-900 text-slate-200 border-slate-700 hover:bg-slate-800'
+              )}
+            >
+              <RefreshCw className={cn('w-3.5 h-3.5 mr-2', isLoadingDbStatus && 'animate-spin')} />
+              Обновить статус
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4">
+              <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">Всего записей</div>
+              <div className="text-2xl text-slate-100 font-light">{total}</div>
+            </div>
+            <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4">
+              <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">Опасные сообщения</div>
+              <div className="text-2xl text-red-400 font-light">{dangers}</div>
+            </div>
+            <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4">
+              <div className="text-xs text-slate-500 uppercase tracking-wider mb-2">Размер файла БД</div>
+              <div className="text-2xl text-slate-100 font-light">{formatBytes(numberOrFallback(dbStatus?.file?.sizeBytes, 0))}</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4 space-y-2">
+              <div className="text-xs text-slate-500 uppercase tracking-wider">Путь к БД</div>
+              <div className="text-sm font-mono text-slate-300 break-all">{dbStatus?.file?.path ?? '—'}</div>
+              <div className="text-xs text-slate-500">Файл существует: {dbStatus?.file?.exists ? 'да' : 'нет'}</div>
+            </div>
+            <div className="bg-[#0A0A0B] border border-slate-800 rounded-lg p-4 space-y-2">
+              <div className="text-xs text-slate-500 uppercase tracking-wider">Временные метки</div>
+              <div className="text-sm text-slate-300">Первое сообщение: {formatDbTimestamp(dbStatus?.messages?.firstMessageAt ?? null)}</div>
+              <div className="text-sm text-slate-300">Последнее сообщение: {formatDbTimestamp(dbStatus?.messages?.lastMessageAt ?? null)}</div>
+              <div className="text-sm text-slate-300">Первое получение: {formatDbTimestamp(dbStatus?.messages?.firstReceivedAt ?? null)}</div>
+              <div className="text-sm text-slate-300">Последнее получение: {formatDbTimestamp(dbStatus?.messages?.lastReceivedAt ?? null)}</div>
+            </div>
+          </div>
+
+          <div className="mt-4 bg-[#0A0A0B] border border-slate-800 rounded-lg p-4">
+            <div className="text-xs text-slate-500 uppercase tracking-wider mb-3">Распределение по категориям</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              {(THREAT_TYPES as ThreatLabel[]).map((type) => (
+                <div key={type} className="flex items-center justify-between bg-slate-900/40 border border-slate-800 rounded-md px-3 py-2">
+                  <span className="text-slate-300">{THREAT_LABELS[type]}</span>
+                  <span className="text-slate-400 font-mono">{numberOrFallback(byType?.[type], 0)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3 mt-5">
+            <button
+              onClick={handleVacuumDatabase}
+              disabled={dbAction !== null}
+              className={cn(
+                'px-4 py-2 rounded-lg text-sm font-medium border transition-colors',
+                dbAction !== null
+                  ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
+                  : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20 hover:bg-emerald-500/20'
+              )}
+            >
+              {dbAction === 'vacuum' ? 'Выполняется VACUUM...' : 'Оптимизировать (VACUUM)'}
+            </button>
+            <button
+              onClick={handleClearDatabase}
+              disabled={dbAction !== null}
+              className={cn(
+                'px-4 py-2 rounded-lg text-sm font-medium border transition-colors',
+                dbAction !== null
+                  ? 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed'
+                  : 'bg-red-500/10 text-red-300 border-red-500/20 hover:bg-red-500/20'
+              )}
+            >
+              {dbAction === 'clear' ? 'Очистка...' : 'Очистить все сообщения'}
+            </button>
           </div>
         </div>
       </div>
@@ -2497,16 +2891,25 @@ function SentinelApp() {
           </div>
           <h1 className="text-lg font-semibold tracking-tight text-slate-100">Sentinel AI</h1>
         </div>
-        
+
         <nav className="flex-1 px-4 py-6 space-y-1">
-          <button 
+          <button
             onClick={() => setActiveTab('dashboard')}
             className={cn(
               "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
               activeTab === 'dashboard' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
             )}
           >
-            <Activity className="w-4 h-4 mr-3" /> Панель
+            <Activity className="w-4 h-4 mr-3" /> {'\u041f\u0430\u043d\u0435\u043b\u044c'}
+          </button>
+          <button
+            onClick={() => setActiveTab('dangers')}
+            className={cn(
+              "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+              activeTab === 'dangers' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+            )}
+          >
+            <AlertTriangle className="w-4 h-4 mr-3" /> {'\u041e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438'}
           </button>
           {user.role === 'admin' && (
             <>
@@ -2546,16 +2949,25 @@ function SentinelApp() {
               >
                 <LinkIcon className="w-4 h-4 mr-3" /> {'\u041f\u0440\u043e\u043a\u0441\u0438'}
               </button>
+              <button
+                onClick={() => setActiveTab('database')}
+                className={cn(
+                  "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  activeTab === 'database' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                )}
+              >
+                <Database className="w-4 h-4 mr-3" /> {'\u0423\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u0411\u0414'}
+              </button>
             </>
           )}
-          <button 
+          <button
             onClick={() => setActiveTab('logs')}
             className={cn(
               "w-full flex items-center px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
               activeTab === 'logs' ? "bg-indigo-500/10 text-indigo-400" : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
             )}
           >
-            <Database className="w-4 h-4 mr-3" /> Системные журналы
+            <Database className="w-4 h-4 mr-3" /> {'\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u0436\u0443\u0440\u043d\u0430\u043b\u044b'}
           </button>
         </nav>
 
@@ -2575,7 +2987,16 @@ function SentinelApp() {
         {/* Header */}
         <header className="h-16 border-b border-slate-800/60 bg-[#0A0A0B]/80 backdrop-blur-md flex items-center justify-between px-8 sticky top-0 z-10">
           <h2 className="text-lg font-medium text-slate-100 capitalize">
-            {activeTab === 'dashboard' ? 'Панель' : activeTab === 'agents' ? 'Агенты' : activeTab === 'engine' ? 'Настройка движка' : activeTab === 'engineTest' ? 'Тест движка' : activeTab === 'proxy' ? 'Прокси' : 'Системные журналы'}
+                        {{
+              dashboard: '\u041f\u0430\u043d\u0435\u043b\u044c',
+              dangers: '\u041e\u043f\u0430\u0441\u043d\u043e\u0441\u0442\u0438',
+              database: '\u0423\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u0438\u0435 \u0411\u0414',
+              agents: '\u0410\u0433\u0435\u043d\u0442\u044b',
+              engine: '\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430 \u0434\u0432\u0438\u0436\u043a\u0430',
+              engineTest: '\u0422\u0435\u0441\u0442 \u0434\u0432\u0438\u0436\u043a\u0430',
+              proxy: '\u041f\u0440\u043e\u043a\u0441\u0438',
+              logs: '\u0421\u0438\u0441\u0442\u0435\u043c\u043d\u044b\u0435 \u0436\u0443\u0440\u043d\u0430\u043b\u044b',
+            }[activeTab]}
           </h2>
           
           <div className="flex items-center space-x-4">
@@ -2612,6 +3033,8 @@ function SentinelApp() {
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
           {activeTab === 'dashboard' && renderDashboard()}
+          {activeTab === 'dangers' && renderDangers()}
+          {activeTab === 'database' && renderDatabase()}
           {activeTab === 'agents' && renderSettings('agents')}
           {activeTab === 'engine' && renderSettings('engine')}
           {activeTab === 'engineTest' && renderSettings('engineTest')}
@@ -2642,4 +3065,3 @@ export default function App() {
     </AuthProvider>
   )
 }
-
