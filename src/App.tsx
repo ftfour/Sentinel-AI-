@@ -1145,6 +1145,13 @@ function PublicThreatBoard() {
 }
 
 function ProjectPresentationPage() {
+  const summaryKpis = [
+    { label: 'Категорий риска', value: '6', note: 'Threat, Scam, Drugs, Recruitment, Terrorism, Toxicity' },
+    { label: 'Режимов Telegram', value: '2', note: 'Bot API и User Session (MTProto)' },
+    { label: 'Ролей доступа', value: '2', note: 'Admin и Viewer' },
+    { label: 'Контуров хранения', value: '2', note: 'SQLite + RAM-only для чувствительных сценариев' },
+  ];
+
   const solvedProblems = [
     {
       title: 'Информационная перегрузка',
@@ -1166,69 +1173,196 @@ function ProjectPresentationPage() {
       description:
         'При работе с чувствительными чатами нужна архитектура с минимальным хранением и контролируемым контуром обработки.',
     },
+    {
+      title: 'Слабая воспроизводимость аналитики',
+      description:
+        'Без единых порогов и централизованных настроек сложно сравнивать результаты разных смен и команд.',
+    },
+    {
+      title: 'Разрыв между анализом и отчетностью',
+      description:
+        'Инциденты часто не доходят до ответственных в формате, пригодном для принятия решений и эскалации.',
+    },
   ];
 
   const targetAudience = [
-    'Службы корпоративной безопасности и compliance-команды.',
-    'Администраторы Telegram-сообществ (в том числе crypto/fintech) для защиты от скама и токсичности.',
-    'OSINT-аналитики и исследовательские центры, работающие с открытыми источниками.',
-    'Гос- и правоохранительные структуры в рамках законных сценариев мониторинга.',
+    {
+      segment: 'Корпоративная безопасность',
+      needs: 'Раннее выявление угроз, понятная маршрутизация инцидентов, снижение ручной нагрузки команды.',
+    },
+    {
+      segment: 'Администраторы Telegram-сообществ',
+      needs: 'Быстро отсекать скам и токсичность, удерживать качество дискуссии, снижать репутационные риски.',
+    },
+    {
+      segment: 'OSINT и аналитические центры',
+      needs: 'Системно мониторить открытые источники, собирать сигналы и готовить структурированные отчеты.',
+    },
+    {
+      segment: 'Госструктуры и НКО',
+      needs: 'Работать в правовом контуре и фиксировать только релевантные факты в рамках законных процедур.',
+    },
   ];
 
   const architectureBlocks = [
     {
-      title: 'Frontend + API в одном контуре',
+      title: 'UI слой (React + Vite)',
       details:
-        'Монолитный Node.js процесс поднимает React интерфейс и Express API, что упрощает эксплуатацию MVP.',
+        'Публичная панель, admin-панель, разделы настройки, тестирования движка, отчеты и рабочие режимы операторов.',
     },
     {
-      title: 'Подключение к Telegram',
+      title: 'API слой (Express + session)',
+      details:
+        'Единая точка управления состоянием системы: авторизация, конфигурация, статус движка, данные для интерфейса.',
+    },
+    {
+      title: 'Источник событий (Telegram)',
       details:
         'Поддерживаются Bot API и User session (MTProto), поэтому доступны сценарии для публичных и закрытых источников.',
     },
     {
-      title: 'Гибридный движок анализа',
+      title: 'AI/Rule Engine',
       details:
         'Классификация строится на комбинации ML-моделей и эвристик/триггеров по категориям: threat, scam, drugs, recruitment, terrorism, toxicity.',
     },
     {
-      title: 'Контур хранения',
+      title: 'Storage & Alerts',
       details:
-        'Для открытых данных используется SQLite, для чувствительных сценариев доступен RAM-only режим без долговременного архива переписки.',
+        'Открытые данные сохраняются в SQLite. Для чувствительных сценариев применяется RAM-only режим. Отчеты и алерты доставляются через SMTP.',
     },
   ];
 
   const technologies = [
-    'TypeScript + Node.js 22',
-    'Express + express-session + rate limit',
-    'React 19 + Vite 6 + Tailwind CSS',
-    'Telegram client (GramJS/telegram)',
-    '@huggingface/transformers + ONNX модели',
-    'SQLite (better-sqlite3) + RAM режим',
-    'SMTP (nodemailer) для алертов и отчетов',
+    { group: 'Backend', items: 'TypeScript, Node.js 22, Express, express-session, rate limiting' },
+    { group: 'Frontend', items: 'React 19, Vite 6, Tailwind CSS 4, адаптивная UI-структура' },
+    { group: 'ML/NLP', items: '@huggingface/transformers, ONNX runtime, гибрид Rule + Model' },
+    { group: 'Data', items: 'SQLite (better-sqlite3), RAM-only storage mode для приватных чатов' },
+    { group: 'Integrations', items: 'Telegram (Bot API + MTProto), SMTP через nodemailer' },
   ];
 
   const prototypeStructure = [
-    'Публичная панель потока сообщений и категории угроз без авторизации.',
-    'Ролевая авторизация: admin и viewer.',
-    'Админ-панель с настройкой Telegram, прокси, порогов и триггеров.',
-    'Встроенный раздел тестирования движка на русскоязычных тест-кейсах.',
-    'Подготовка отчетов и отправка по email через SMTP.',
+    {
+      name: 'Публичная панель',
+      description: 'Показывает входящий поток, статистику и последние срабатывания без доступа к административным функциям.',
+    },
+    {
+      name: 'Контур управления',
+      description: 'Ролевой вход (admin/viewer), запуск и остановка движка, управление настройками в одном интерфейсе.',
+    },
+    {
+      name: 'AI-движок и тестовый стенд',
+      description: 'Тонкая настройка порогов, весов и триггеров, плюс встроенный self-test на русскоязычных кейсах.',
+    },
+    {
+      name: 'Режим очков (RAM-only)',
+      description: 'Оперативный анализ приватных/закрытых источников без долговременной записи чувствительного контента на диск.',
+    },
+    {
+      name: 'Отчеты и коммуникации',
+      description: 'Подготовка итогов по инцидентам и отправка уведомлений ответственным через SMTP.',
+    },
   ];
 
   const userFlow = [
-    'Администратор входит в систему и открывает /app.',
-    'Подключает Telegram (bot или user session) и выбирает целевые чаты.',
-    'Настраивает пороги, триггеры, модель и параметры движка.',
-    'Запускает мониторинг и получает классифицированные события в реальном времени.',
-    'Фильтрует инциденты, готовит отчет и отправляет его ответственным по SMTP.',
+    {
+      step: 'Шаг 1',
+      action: 'Администратор входит в систему и выбирает рабочий режим (bot / user session).',
+      outcome: 'Система готова к подключению источников данных.',
+    },
+    {
+      step: 'Шаг 2',
+      action: 'Подключаются целевые чаты и каналы, при необходимости настраивается прокси.',
+      outcome: 'Формируется перечень наблюдаемых источников.',
+    },
+    {
+      step: 'Шаг 3',
+      action: 'Настраиваются пороги по категориям, триггеры и выбор модели.',
+      outcome: 'Движок адаптируется под профиль рисков конкретной команды.',
+    },
+    {
+      step: 'Шаг 4',
+      action: 'Запускается мониторинг в реальном времени.',
+      outcome: 'Сообщения классифицируются по риску и попадают в панели наблюдения.',
+    },
+    {
+      step: 'Шаг 5',
+      action: 'Оператор анализирует инциденты, фильтрует ложные срабатывания.',
+      outcome: 'Получается чистый список событий для реакции.',
+    },
+    {
+      step: 'Шаг 6',
+      action: 'Подготавливается отчет и отправляется ответственным по SMTP.',
+      outcome: 'Инцидент доводится до принятия решений и формальной эскалации.',
+    },
   ];
 
   const legalBackground = [
-    'Архитектура ориентирована на минимизацию хранения чувствительных данных (RAM-only для приватных сценариев).',
-    'Инференс выполняется локально, без обязательной отправки текстов во внешние AI-сервисы.',
-    'Для публичных источников возможен OSINT-сценарий, для закрытых требуется законный доступ пользователя к чату.',
-    'Важно: юридическая оценка зависит от юрисдикции и регламентов организации; перед эксплуатацией нужен комплаенс-аудит.',
+    {
+      title: 'Принцип минимизации данных',
+      details:
+        'Для чувствительных сценариев применяется RAM-only подход: анализ выполняется в оперативной памяти без долговременного архива переписки.',
+    },
+    {
+      title: 'Локальный инференс',
+      details:
+        'ML-обработка выполняется локально в инфраструктуре заказчика, без обязательной передачи контента внешним AI-провайдерам.',
+    },
+    {
+      title: 'Разделение режимов использования',
+      details:
+        'Для открытых источников подходит OSINT-поток. Для закрытых источников требуется законное основание и доступ аккаунта к соответствующему чату.',
+    },
+    {
+      title: 'Организационные меры',
+      details:
+        'Перед внедрением рекомендуется провести комплаенс-аудит, закрепить внутренний регламент, роли доступа и политику реагирования на инциденты.',
+    },
+  ];
+
+  const productAdvantages = [
+    'Гибридный подход: модель + эвристики, что снижает ложные срабатывания по сравнению с простыми keyword-фильтрами.',
+    'Работа в on-prem контуре, подходящем для организаций с повышенными требованиями к приватности.',
+    'Единая панель для полного цикла: настройка, мониторинг, тестирование, отчеты и алерты.',
+    'Быстрый запуск MVP без сложной инфраструктуры: один серверный процесс и понятный контур эксплуатации.',
+  ];
+
+  const useCases = [
+    {
+      title: 'Антискам для сообщества',
+      details:
+        'Система отслеживает обещания гарантированной прибыли, предоплаты и подозрительные паттерны, после чего выделяет критичные сообщения в ленте рисков.',
+    },
+    {
+      title: 'Мониторинг радикальной риторики',
+      details:
+        'В потоке выделяются признаки угроз, вербовки и подготовки насильственных сценариев для оперативного анализа оператором.',
+    },
+    {
+      title: 'Контур корпоративного DLP',
+      details:
+        'Внутренние security-команды получают инструмент раннего обнаружения токсичных, мошеннических и деструктивных коммуникаций.',
+    },
+  ];
+
+  const roadmap = [
+    {
+      phase: 'Этап 1 (текущий MVP)',
+      tasks: 'Текстовый мониторинг Telegram, гибридный анализ, роли доступа, отчеты и SMTP-уведомления.',
+    },
+    {
+      phase: 'Этап 2',
+      tasks: 'Расширение мультимедиа-аналитики (изображения/видео/аудио), обогащение сценариев расследования.',
+    },
+    {
+      phase: 'Этап 3',
+      tasks: 'Интеграции с внешними SIEM/SOC контурами и автоматизированный экспорт инцидентов.',
+    },
+  ];
+
+  const deploymentPlan = [
+    'Изменения вносятся в `main`, после чего запускается GitHub Actions workflow деплоя.',
+    'Сервер обновляет frontend bundle и backend процесс в рамках текущего пайплайна.',
+    'После релиза презентация доступна по маршруту `/presentation` в продовой среде.',
   ];
 
   return (
@@ -1267,6 +1401,22 @@ function ProjectPresentationPage() {
 
         <section className="rounded-2xl border border-slate-800 bg-[#10131b]/80 p-5 md:p-6">
           <div className="flex items-center gap-2 mb-4">
+            <Activity className="w-4 h-4 text-sky-300" />
+            <h2 className="text-lg font-semibold">Ключевые параметры решения</h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            {summaryKpis.map((item) => (
+              <div key={item.label} className="rounded-lg border border-slate-800 bg-slate-900/55 p-4">
+                <div className="text-xs text-slate-500 uppercase tracking-wider">{item.label}</div>
+                <div className="text-2xl font-semibold text-slate-100 mt-2">{item.value}</div>
+                <div className="text-xs text-slate-400 mt-2">{item.note}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-[#10131b]/80 p-5 md:p-6">
+          <div className="flex items-center gap-2 mb-4">
             <AlertTriangle className="w-4 h-4 text-amber-300" />
             <h2 className="text-lg font-semibold">Какие проблемы решает проект</h2>
           </div>
@@ -1287,8 +1437,9 @@ function ProjectPresentationPage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {targetAudience.map((item) => (
-              <div key={item} className="rounded-lg border border-slate-800 bg-slate-900/55 p-4 text-sm text-slate-200">
-                {item}
+              <div key={item.segment} className="rounded-lg border border-slate-800 bg-slate-900/55 p-4">
+                <div className="text-sm font-medium text-slate-100">{item.segment}</div>
+                <div className="text-sm text-slate-300 mt-2">{item.needs}</div>
               </div>
             ))}
           </div>
@@ -1309,13 +1460,28 @@ function ProjectPresentationPage() {
           </div>
           <div className="rounded-lg border border-slate-800 bg-slate-900/55 p-4">
             <h3 className="text-sm font-medium text-slate-100 mb-3">Технологический стек</h3>
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {technologies.map((tech) => (
-                <span key={tech} className="text-xs px-2.5 py-1 rounded-full border border-slate-700 bg-slate-950/60 text-slate-300">
-                  {tech}
-                </span>
+                <div key={tech.group} className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+                  <div className="text-xs uppercase tracking-wider text-slate-500">{tech.group}</div>
+                  <div className="text-sm text-slate-200 mt-1">{tech.items}</div>
+                </div>
               ))}
             </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-[#10131b]/80 p-5 md:p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Shield className="w-4 h-4 text-emerald-300" />
+            <h2 className="text-lg font-semibold">Ценность и конкурентные преимущества</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {productAdvantages.map((item) => (
+              <div key={item} className="rounded-lg border border-slate-800 bg-slate-900/55 p-4 text-sm text-slate-200">
+                {item}
+              </div>
+            ))}
           </div>
         </section>
 
@@ -1327,9 +1493,10 @@ function ProjectPresentationPage() {
             </div>
             <div className="space-y-3">
               {prototypeStructure.map((item, index) => (
-                <div key={item} className="rounded-lg border border-slate-800 bg-slate-900/55 p-3">
+                <div key={item.name} className="rounded-lg border border-slate-800 bg-slate-900/55 p-3">
                   <div className="text-xs text-slate-500 mb-1">Блок {index + 1}</div>
-                  <p className="text-sm text-slate-200">{item}</p>
+                  <p className="text-sm font-medium text-slate-100">{item.name}</p>
+                  <p className="text-sm text-slate-300 mt-1">{item.description}</p>
                 </div>
               ))}
             </div>
@@ -1341,13 +1508,29 @@ function ProjectPresentationPage() {
               <h2 className="text-lg font-semibold">User Flow</h2>
             </div>
             <div className="space-y-3">
-              {userFlow.map((item, index) => (
-                <div key={item} className="rounded-lg border border-slate-800 bg-slate-900/55 p-3">
-                  <div className="text-xs text-slate-500 mb-1">Шаг {index + 1}</div>
-                  <p className="text-sm text-slate-200">{item}</p>
+              {userFlow.map((item) => (
+                <div key={item.step} className="rounded-lg border border-slate-800 bg-slate-900/55 p-3">
+                  <div className="text-xs text-slate-500 mb-1">{item.step}</div>
+                  <p className="text-sm text-slate-100">{item.action}</p>
+                  <p className="text-xs text-slate-400 mt-1">{item.outcome}</p>
                 </div>
               ))}
             </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-[#10131b]/80 p-5 md:p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Terminal className="w-4 h-4 text-violet-300" />
+            <h2 className="text-lg font-semibold">Сценарии применения</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {useCases.map((item) => (
+              <article key={item.title} className="rounded-lg border border-slate-800 bg-slate-900/55 p-4">
+                <h3 className="text-sm font-medium text-slate-100">{item.title}</h3>
+                <p className="text-sm text-slate-300 mt-2">{item.details}</p>
+              </article>
+            ))}
           </div>
         </section>
 
@@ -1358,14 +1541,51 @@ function ProjectPresentationPage() {
           </div>
           <div className="space-y-2">
             {legalBackground.map((item) => (
-              <div key={item} className="rounded-lg border border-amber-500/20 bg-[#10131b]/70 p-3 text-sm text-slate-200">
-                {item}
+              <div key={item.title} className="rounded-lg border border-amber-500/20 bg-[#10131b]/70 p-3">
+                <p className="text-sm font-medium text-amber-100">{item.title}</p>
+                <p className="text-sm text-slate-200 mt-1">{item.details}</p>
               </div>
             ))}
           </div>
           <p className="text-xs text-slate-400 mt-4">
             Материал носит информационный характер и не заменяет юридическую консультацию.
           </p>
+        </section>
+
+        <section className="rounded-2xl border border-slate-800 bg-[#10131b]/80 p-5 md:p-6 mb-8">
+          <div className="flex items-center gap-2 mb-4">
+            <Settings className="w-4 h-4 text-cyan-300" />
+            <h2 className="text-lg font-semibold">Roadmap и деплой</h2>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="rounded-lg border border-slate-800 bg-slate-900/55 p-4">
+              <h3 className="text-sm font-medium text-slate-100 mb-3">План развития</h3>
+              <div className="space-y-3">
+                {roadmap.map((item) => (
+                  <div key={item.phase} className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+                    <div className="text-xs uppercase tracking-wider text-slate-500">{item.phase}</div>
+                    <div className="text-sm text-slate-200 mt-1">{item.tasks}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-800 bg-slate-900/55 p-4">
+              <h3 className="text-sm font-medium text-slate-100 mb-3">Как деплоится релиз</h3>
+              <div className="space-y-3">
+                {deploymentPlan.map((item, index) => (
+                  <div key={item} className="rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+                    <div className="text-xs uppercase tracking-wider text-slate-500">Шаг {index + 1}</div>
+                    <div className="text-sm text-slate-200 mt-1">{item}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-200">
+                После пуша в `main` эта страница автоматически уходит в прод через настроенный GitHub Actions workflow.
+              </div>
+            </div>
+          </div>
         </section>
       </div>
     </div>
